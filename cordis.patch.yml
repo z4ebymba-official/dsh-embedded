@@ -1,0 +1,12 @@
+# board-lab bundle patch: adds the embedded closed-loop tools to a profile.
+- insert:
+    - id: board-lab
+      name: '@local/board-lab'
+      config:
+        # Project paths resolve against the Harness working directory. Pin an
+        # absolute path here only for an unusual layout; leaving it empty keeps
+        # the bundle portable between machines.
+        # workspaceRoot: 'D:\work\default-workspace'
+        # Optional: workspace-local toolchain; when absent PlatformIO from the
+        # system (or its own virtualenv) is used instead.
+        toolchainDir: '.toolchain'

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Board lab",
+    "description": "The Board lab panel and agent tools for ESP32 and AT32: build, flash, read UART, run the flash-read-fix loop."
+  }
+}
