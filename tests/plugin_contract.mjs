@@ -23,7 +23,9 @@ import { fileURLToPath } from 'node:url'
 
 import { apply, name } from '../index.js'
 
-const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
+const PLUGIN = dirname(dirname(fileURLToPath(import.meta.url)))
+// Firmware projects live in the workspace that contains the plugin directory.
+const ROOT = dirname(PLUGIN)
 // Keep the test out of the runtime state: a pty monitor must not leave log or
 // offset files behind for the ports the real session uses.
 const STATE_DIR = mkdtempSync(join(tmpdir(), 'board-lab-contract-'))

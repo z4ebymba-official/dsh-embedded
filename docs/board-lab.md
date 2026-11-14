@@ -15,6 +15,7 @@
 | `board_watch` | ждать строку по regex: стартует монитор при необходимости и возвращает `matched`, найденную строку и хвост лога; без `fromStart` — только новые строки, с ним — и история; `timeoutMs` 0.5–120 с |
 | `board_info` | `esptool flash_id`: чип, revision, размер flash, PSRAM, MAC (монитор останавливается на время опроса и перезапускается со сбросом) |
 | `board_decode` | декодер паник: `Guru Meditation Error`, `abort()`, `assert failed`, `Backtrace`/`MCPC` → `addr2line` по ELF проекта: функция, файл, строка; печатает, какой ELF и когда собран |
+| `board_doctor` | проверить окружение машины и получить список «чего не хватает» |
 | `board_detect` | определить плату: vid/pid → `esptool flash-id` → семейство чипа → подходящий проект и env из `firmware/*/platformio.ini`; кэш «порт → проект» в `.board-lab/boards.json` |
 | `board_test` | сценарный прогон по `board-tests.json` (`flash`, `build`, `watch`, `write`, `absent`, `reset`, `sleep`): шаги, тайминги, отчёт в `.board-lab/runs/<ts>/` |
 | `board_cycle` | `build → flash → start monitor → собрать вывод durationMs` (или до regex) |
@@ -129,6 +130,45 @@ board_decode project=firmware/esp32s3-touch-tm1637 port=/dev/ttyACM0 text="Guru 
 подходящий проект. Если кандидатов несколько, инструмент честно перечисляет их и просит
 указать `project`, а не угадывает. AT32 с J-Link/ST-Link шьётся без serial-порта (порт нужен
 только ESP32 и `make`-проектам без probe).
+
+## AVR (Arduino Uno / Nano / Mega)
+
+AVR-платы прошиваются через PlatformIO: `platform = atmelavr`, `board = uno`, `framework = arduino`;
+PlatformIO сам вызывает avrdude и сам находит порт. Скорость 115200, на платах с CH340/FTDI нужен
+системный драйвер (Windows — CH341SER, Linux — `ch341`/`ftdi_sio`).
+
+Особенности, которые уже учтены:
+
+- **Нет chip id до прошивки.** AVR не умеет отдавать идентификатор по serial, поэтому
+  `board_detect` для портов Arduino (VID `2341`/`2a03`) возвращает family `avr` и просит указать
+  проект, а не гадает. Для кэша (`boards.json`) после успешной прошивки проект запоминается.
+- **Сброс при открытии порта.** Монитор открывает порт с `dsrdtr=False`, поэтому не дёргает DTR и не
+  перезагружает плату; прошивка перезапускает монитор с импульсом сброса, чтобы поймать баннер.
+- **Uno/Nano**: 32 КБ flash, 2 КБ SRAM — большие баннеры и `String` лучше не лить.
+
+Готовый пример: `firmware/arduino-uno-hello` (баннер, heartbeat, PING/HELLO/RESET, `board-tests.json`).
+
+## STM32 (F1/F4/G0/G4/L4/H7)
+
+STM32 прошивается через `platform = ststm32`. Способ задаётся в `platformio.ini`:
+
+```ini
+[env:bluepill]
+platform = ststm32
+board = bluepill_f103c8
+framework = arduino        ; или stm32cube, cmsis
+upload_protocol = stlink   ; stlink | dfu | jlink | openocd | cmsis-dap
+```
+
+- **Probe-протоколы не требуют serial-порта.** Если `upload_protocol` — `stlink`, `dfu`, `jlink`,
+  `openocd` или `cmsis-dap`, `board_flash` не ищет порт и не падает с «no serial port»; `--upload-port`
+  добавляется только когда порт реально есть.
+- **`board_info` для STM32** читает `st-info --probe` (пакет stlink-tools): dev-type, chipid, flash, SRAM.
+  Если инструментов нет — возвращает family `stm32` и подсказку.
+- **UART** обычно висит на USB-UART переходнике (PA9/PA10 → COMx). Монитор работает как с любым портом.
+- **DFU**: `upload_protocol = dfu` использует встроенный загрузчик (BOOT0 прижат к 3.3 В при старте).
+
+Готовый пример: `firmware/stm32f103-hello` (USART1 PA9/PA10, PING/HELLO/RESET, сценарий).
 
 ## ESP32-S3 (WROOM-1-N16R8)
 

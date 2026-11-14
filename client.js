@@ -537,6 +537,23 @@ window.__ModuleLoader__.load({
         }
       }, [port, append, refresh, t])
 
+      // Preflight for this machine: PlatformIO, pyserial, probes, ports.
+      const checkEnv = useCallback(async () => {
+        setBusy('doctor')
+        try {
+          const result = await call('/board-lab/doctor', {})
+          append('info', result.summary, result.ok === true)
+          for (const item of result.checks ?? []) {
+            append('info', `${item.ok ? '✓' : '✗'} ${item.name}${item.detail !== undefined ? ` · ${item.detail}` : ''}`, item.ok === true)
+            if (item.ok !== true && item.fix !== undefined) append('info', `→ ${item.fix}`, undefined)
+          }
+        } catch (cause) {
+          append('info', `✖ ${cause instanceof Error ? cause.message : String(cause)}`, false)
+        } finally {
+          setBusy(null)
+        }
+      }, [append])
+
       // Run the project's board-tests.json scenario and print the step table.
       const runTests = useCallback(async () => {
         if (project === '') return
@@ -679,6 +696,8 @@ window.__ModuleLoader__.load({
                 button(S.ghost, disabled || project === '', { onClick: runTests },
                   busy === 'test' ? t('action.testing') : t('action.test')),
                 h('div', { style: S.spacer }),
+                button(S.ghost, busy === 'doctor', { onClick: checkEnv },
+                  busy === 'doctor' ? t('action.checking') : t('action.check')),
               ),
             ),
 
@@ -879,6 +898,8 @@ window.__ModuleLoader__.load({
         'action.flashing': 'Flashing…',
         'action.info': 'Chip info',
         'action.inspecting': 'Reading chip…',
+        'action.check': 'Check setup',
+        'action.checking': 'Checking…',
         'action.detect': 'Detect board',
         'action.detecting': 'Detecting…',
         'action.test': 'Run tests',
@@ -959,6 +980,8 @@ window.__ModuleLoader__.load({
         'action.flashing': 'Прошивка…',
         'action.info': 'Инфо о чипе',
         'action.inspecting': 'Читаю чип…',
+        'action.check': 'Проверить среду',
+        'action.checking': 'Проверяю…',
         'action.detect': 'Определить плату',
         'action.detecting': 'Определяю…',
         'action.test': 'Прогнать тесты',

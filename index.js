@@ -26,6 +26,7 @@ import {
   listPorts as hostListPorts,
   pathListSeparator,
   pidAlive as hostPidAlive,
+  platformioCoreDir,
   platformioPio,
   platformioPython,
 } from './host.js'
@@ -429,6 +430,7 @@ export function apply(ctx, config = {}) {
       }
       if (key === 'board') current.board = value
       else if (key === 'platform') current.platform = value
+      else if (key === 'upload_protocol') current.uploadProtocol = value
     }
     for (const env of envs) {
       env.family = chipFamilyFromBoard(env.board)
@@ -445,6 +447,8 @@ export function apply(ctx, config = {}) {
     if (value.includes('s2')) return 'esp32s2'
     if (value.includes('esp32c') || value.includes('esp32h') || /\bc[236]\b/.test(value)) return 'riscv32'
     if (value.includes('esp32')) return 'esp32'
+    if (/^(uno|nano|mega|leonardo|micro|pro ?micro|atmega|attiny|arduino)/.test(value)) return 'avr'
+    if (value.includes('stm32') || /^(bluepill|blackpill|f103|f401|f411|f405|g0|g4|l4|h7)/.test(value)) return 'stm32'
     return undefined
   }
 
@@ -456,6 +460,42 @@ export function apply(ctx, config = {}) {
     if (value.includes('ESP32-C') || value.includes('ESP32-H')) return 'riscv32'
     if (value.includes('ESP32')) return 'esp32'
     return undefined
+  }
+
+  /** Chip family hinted by the USB vendor id of an attached port. */
+  function usbFamily(vendorId, productId) {
+    const vendor = String(vendorId ?? '').toLowerCase()
+    if (vendor === '2341' || vendor === '2a03') return 'avr'
+    if (vendor === '0483') return 'stm32'
+    if (vendor === '2e3c') return 'at32'
+    if (vendor === '303a') return 'esp32'
+    return undefined
+  }
+
+  /** STM32 over an ST-Link probe (st-info from the stlink tools). */
+  async function probeStm32() {
+    if (!hasCommand('st-info')) return undefined
+    try {
+      const result = await runProcess('st-info', ['--probe'], { timeoutMs: 15_000 })
+      const output = clean(`${result.stdout}\n${result.stderr}`)
+      if (result.ok !== true) return undefined
+      const devType = /dev-type:\s*(\S+)/i.exec(output)?.[1]
+      const chipId = /chipid:\s*(0x[0-9a-f]+)/i.exec(output)?.[1]
+      if (devType === undefined && chipId === undefined) return undefined
+      const flash = /flash:\s*(\d+)/i.exec(output)?.[1]
+      const sram = /sram:\s*(\d+)/i.exec(output)?.[1]
+      return {
+        family: 'stm32',
+        chip: devType ?? chipId,
+        chipId,
+        flashSize: flash === undefined ? undefined : `${Math.round(Number(flash) / 1024)}KB`,
+        sramSize: sram === undefined ? undefined : `${Math.round(Number(sram) / 1024)}KB`,
+        note: 'read with st-info --probe (ST-Link)',
+        output,
+      }
+    } catch {
+      return undefined
+    }
   }
 
   /** One project with its environments and chip families. */
@@ -1147,13 +1187,21 @@ export function apply(ctx, config = {}) {
       project = resolved.project
       env = env ?? resolved.env
     }
+    // A probe upload (ST-Link / J-Link / CMSIS-DAP / OpenOCD / DFU) needs no
+    // serial port; serial bootloaders do. `upload_protocol` in platformio.ini
+    // says which kind this project is.
+    let probeCapable = kind === 'make' && probeProtocol
+    if (kind === 'pio') {
+      const envs = pioEnvs(dir)
+      const chosenEnv = envs.find((item) => item.name === env) ?? envs.find((item) => item.default) ?? envs[0]
+      const configured = String(chosenEnv?.uploadProtocol ?? '').toLowerCase()
+      probeCapable = probeProtocol || ['stlink', 'dfu', 'jlink', 'cmsis-dap', 'openocd'].includes(configured)
+    }
     if (chosenPort === undefined) {
       try {
         chosenPort = selectPort(undefined)
       } catch (error) {
-        // A probe-based AT32 upload needs no serial port at all; only a serial
-        // or DFU upload does. ESP32 always needs one.
-        if (!(kind === 'make' && probeProtocol)) throw error
+        if (!probeCapable) throw error
       }
     }
     const before = chosenPort === undefined ? undefined : monitorState(chosenPort)
@@ -1168,7 +1216,7 @@ export function apply(ctx, config = {}) {
         const argv = ['run', '-d', dir, '-t', 'upload']
         if (env) argv.push('-e', env)
         if (protocol) argv.push('--upload-protocol', protocol)
-        argv.push('--upload-port', chosenPort)
+        if (chosenPort !== undefined) argv.push('--upload-port', chosenPort)
         result = await runPio(argv, { timeoutMs: 300_000 })
       } else {
         const extraEnv = {}
@@ -1385,6 +1433,18 @@ export function apply(ctx, config = {}) {
    * answer is machine input (family → project) rather than a log line.
    */
   async function identityForPort(port) {
+    // USB ids answer the family question without touching the port, and AVR
+    // boards have no chip id at all until a programmer runs.
+    const entry = attachedPorts().find((item) => item.path === port)
+    const guess = usbFamily(entry?.vendorId, entry?.productId)
+    if (guess === 'stm32') {
+      const probed = await probeStm32()
+      if (probed !== undefined) return probed
+      return { family: 'stm32', note: 'no ST-Link probe tools found (st-info); PlatformIO can still flash if upload_protocol is set' }
+    }
+    if (guess === 'avr') {
+      return { family: 'avr', note: 'AVR boards report no chip id before programming; name the project explicitly' }
+    }
     const before = monitorState(port)
     const wasRunning = before?.running === true
     if (wasRunning) await stopMonitor(port)
@@ -1405,11 +1465,12 @@ export function apply(ctx, config = {}) {
     }
     const output = clean(`${result.stdout}\n${result.stderr}`)
     const chip = /(?:Chip type|Chip is):\s+([A-Za-z0-9-]+)/.exec(output)?.[1] ?? /Detecting chip type\.\.\.\s*([A-Za-z0-9-]+)/.exec(output)?.[1]
-    if (result.code !== 0 && chip === undefined) {
+    if (result.ok !== true && chip === undefined) {
       throw new Error(tail(output, 500).trim() || 'esptool could not read the chip')
     }
     return {
       chip,
+      family: chipFamily(chip),
       flashSize: /Detected flash size:\s*([0-9]+ ?[KMG]B)/i.exec(output)?.[1],
       mac: /MAC:\s*([0-9a-f]{2}(?::[0-9a-f]{2}){5})/i.exec(output)?.[1],
       psram: /Embedded PSRAM\s+([0-9]+ ?MB)/i.exec(output)?.[1],
@@ -1438,7 +1499,7 @@ export function apply(ctx, config = {}) {
     }
     if (options.probe === false) return undefined
     const identity = await identityForPort(port)
-    const family = chipFamily(identity.chip)
+    const family = identity.family ?? chipFamily(identity.chip)
     const matches = projects.filter((project) => project.families.includes(family))
     if (matches.length === 1) {
       const match = matches[0]
@@ -1487,7 +1548,7 @@ export function apply(ctx, config = {}) {
         if (identity.psram !== undefined) result.psram = identity.psram
         if (identity.mac !== undefined) result.mac = identity.mac
         if (identity.revision !== undefined) result.revision = identity.revision
-        const family = chipFamily(identity.chip)
+        const family = identity.family ?? chipFamily(identity.chip)
         if (family !== undefined) {
           result.family = family
           const matches = candidates(family)
@@ -1532,6 +1593,74 @@ export function apply(ctx, config = {}) {
       results.push(result)
     }
     return { ok: true, ports: results }
+  }
+
+  /**
+   * Preflight for a fresh machine: which pieces are present, which are missing
+   * and what to install. Answers "why does flashing not work here" without a
+   * board attached.
+   */
+  async function doctorOp() {
+    const checks = []
+    const add = (name, ok, detail, fix) => checks.push(compact({ name, ok, detail, fix }))
+    const python = pythonCommand()
+    let version
+    try {
+      const result = platformioPio() !== undefined
+        ? await runProcess(platformioPio(), ['--version'], { timeoutMs: 20_000 })
+        : await runPython(['-m', 'platformio', '--version'], { timeoutMs: 20_000 })
+      version = clean(`${result.stdout}\n${result.stderr}`).trim().split(/\r?\n/)[0]
+      add('platformio', result.ok === true, version || 'answered', 'Install PlatformIO (pip install platformio) or point the `python` config at the interpreter that has it.')
+    } catch (error) {
+      add('platformio', false, error instanceof Error ? error.message : String(error), 'Install PlatformIO (pip install platformio) or point the `python` config at the interpreter that has it.')
+    }
+    add('python', python.command !== undefined, `${python.command} (${python.source})`, 'Install Python 3 or set the `python` config.')
+    try {
+      const result = await runPython(['-c', 'import serial; print(serial.__version__)'], { timeoutMs: 20_000 })
+      add('pyserial', result.ok === true, clean(result.stdout).trim() || 'not importable', 'pip install pyserial')
+    } catch (error) {
+      add('pyserial', false, error instanceof Error ? error.message : String(error), 'pip install pyserial')
+    }
+    try {
+      const result = await runPython(['-m', 'esptool', 'version'], { timeoutMs: 20_000 })
+      add('esptool', result.ok === true, clean(result.stdout).trim().split(/\r?\n/)[0], 'pip install esptool (ESP32 chip info and flashing)')
+    } catch {
+      add('esptool', false, 'not installed', 'pip install esptool (ESP32 chip info and flashing)')
+    }
+    // avrdude usually comes with PlatformIO rather than the system PATH.
+    const bundled = (prefix) => {
+      // The workspace toolchain wins over ~/.platformio, exactly like pythonEnv().
+      const packages = join(workspacePio ? join(toolchainDir, 'pio') : platformioCoreDir(), 'packages')
+      try {
+        return readdirSync(packages).filter((name) => name.startsWith(prefix)).map((name) => join(packages, name)).pop()
+      } catch {
+        return undefined
+      }
+    }
+    const avrdude = hasCommand('avrdude') ? 'avrdude' : (bundled('tool-avrdude') ?? bundled('toolchain-atmelavr'))
+    add('avrdude', avrdude !== undefined, avrdude ?? 'not found', 'AVR boards (Arduino Uno/Nano): `pio pkg install -g -p atmelavr` brings avrdude, or install it system-wide.')
+    for (const [tool, why] of [
+      ['st-info', 'ST-Link probes (STM32)'],
+      ['openocd', 'OpenOCD probes (AT32/STM32)'],
+    ]) {
+      add(tool, hasCommand(tool), hasCommand(tool) ? 'found' : 'not found', `${why}: install the vendor tools and add them to PATH (optional if PlatformIO bundles them).`)
+    }
+    const gcc = join(toolchainDir, 'pio', 'packages', 'toolchain-gccarmnoneeabi', 'bin', isWindows ? 'arm-none-eabi-gcc.exe' : 'arm-none-eabi-gcc')
+    add('arm-none-eabi-gcc', existsSync(gcc) || hasCommand('arm-none-eabi-gcc'), existsSync(gcc) ? gcc : 'not found', 'Only needed for Makefile/AT32 projects; PlatformIO downloads its own toolchains.')
+    const ports = attachedPorts()
+    add('serial ports', ports.length > 0, ports.length === 0 ? 'no board attached' : ports.map((port) => `${port.path}${port.vendorId === undefined ? '' : ` (${port.vendorId}:${port.productId})`}`).join(', '), 'Connect the board over USB; on Linux add the user to dialout or install a udev rule, on Windows install the USB-UART driver.')
+    const projects = listProjects()
+    add('workspace', projects.length > 0, `${projects.length} project(s) under ${settings.projectsDir}`, `Put firmware projects under ${settings.projectsDir} or set the \`workspaceRoot\` config.`)
+    add('monitor', existsSync(join(BUNDLE_DIR, 'monitor.py')), join(BUNDLE_DIR, 'monitor.py'), 'Reinstall the board-lab bundle: the UART monitor script is missing.')
+    const required = checks.filter((check) => ['platformio', 'pyserial', 'monitor'].includes(check.name))
+    const failed = checks.filter((check) => check.ok !== true)
+    return {
+      ok: required.every((check) => check.ok === true),
+      summary: failed.length === 0
+        ? 'Everything needed is present.'
+        : `${failed.length} check(s) need attention: ${failed.map((check) => check.name).join(', ')}`,
+      checks,
+    }
   }
 
   /** Wait a window and fail if the pattern appears in new output. */
@@ -2202,6 +2331,47 @@ export function apply(ctx, config = {}) {
       },
     },
     {
+      name: 'board_doctor',
+      label: 'Board environment check',
+      description: 'Check the machine before flashing: PlatformIO, pyserial, esptool, probe tools, ARM gcc, serial ports, workspace projects and the monitor script. Returns one row per check with the exact fix.',
+      parameters: { type: 'object', additionalProperties: false, properties: {} },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ok', 'summary', 'checks'],
+          properties: {
+            ok: { type: 'boolean' },
+            summary: { type: 'string' },
+            checks: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['name', 'ok'],
+                properties: {
+                  name: { type: 'string' },
+                  ok: { type: 'boolean' },
+                  detail: { type: 'string' },
+                  fix: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => [{
+          type: 'text',
+          text: [
+            value.summary,
+            ...(value.checks ?? []).map((check) => `${check.ok ? 'OK  ' : 'FAIL'} ${check.name}${check.detail === undefined ? '' : `: ${check.detail}`}${check.ok !== true && check.fix !== undefined ? `\n     fix: ${check.fix}` : ''}`),
+          ].join('\n'),
+        }],
+      },
+      async execute() {
+        return doctorOp()
+      },
+    },
+    {
       name: 'board_detect',
       description:
         'Identify a connected board and suggest the project to flash: esptool reads the chip, the project platformio.ini environments map board names to chip families, and `.board-lab/boards.json` remembers ports flashed earlier. Returns chip, flash size, PSRAM, MAC, family, candidates and a confidence; a previous monitor is restarted, one that was off stays off. `board_flash` without `project` uses the same matching.',
@@ -2469,6 +2639,7 @@ export function apply(ctx, config = {}) {
       handle('POST', '/board-lab/detect', async (body) => detectOp({
         port: typeof body.port === 'string' ? body.port : undefined,
       })),
+      handle('POST', '/board-lab/doctor', async () => doctorOp()),
       handle('POST', '/board-lab/test', async (body) => testOp({
         project: body.project,
         env: typeof body.env === 'string' ? body.env : undefined,

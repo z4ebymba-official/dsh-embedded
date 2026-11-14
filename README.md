@@ -2,8 +2,9 @@
 
 Плагин для DSH: прошить плату, прочитать UART, поймать панику, прогнать сценарий — не отключая устройство.
 
-Поддерживаются ESP32 / ESP32-S2 / ESP32-S3 (PlatformIO + esptool) и Artery AT32F403A/407
-(GCC + Makefile, прошивка через J-Link / ST-Link / CMSIS-DAP / DFU).
+Поддерживаются ESP32 / ESP32-S2 / ESP32-S3 (PlatformIO + esptool), Arduino AVR — Uno, Nano,
+Mega (PlatformIO + avrdude), STM32 F1/F4/G0/G4/L4/H7 (PlatformIO + ST-Link / DFU / J-Link /
+OpenOCD) и Artery AT32F403A/407 (GCC + Makefile, J-Link / ST-Link / CMSIS-DAP / DFU).
 
 ## Что даёт
 
@@ -20,6 +21,7 @@
 | `board_info` | чип, flash, PSRAM, MAC через `esptool flash_id` |
 | `board_decode` | адреса паники → функция и строка через `addr2line` |
 | `board_detect` | определить плату и подсказать проект/окружение |
+| `board_doctor` | проверить машину: PlatformIO, pyserial, probe-утилиты, порты, проект |
 | `board_test` | прогнать `board-tests.json` проекта и получить отчёт |
 | `board_cycle` | сборка → прошивка → чтение лога одним вызовом |
 
@@ -32,6 +34,10 @@
 - PlatformIO Core: либо системный (`pio` в PATH или `%USERPROFILE%\.platformio\penv` / `~/.platformio/penv`),
   либо локальный тулчейн в `<workspace>/.toolchain` (см. `tools/setup-toolchain.sh` в workspace).
 - Python из PlatformIO уже содержит pyserial и esptool; отдельно ставить ничего не нужно.
+- AVR/Arduino: avrdude приходит с PlatformIO (`platform = atmelavr`); USB-UART драйвер (CH340/FTDI) — из системы.
+- STM32: `platform = ststm32`; прошивка через ST-Link (`st-info`/`STM32CubeProgrammer`), DFU или J-Link.
+  Если в `platformio.ini` стоит `upload_protocol = stlink` (или `dfu`/`jlink`/`openocd`), serial-порт для
+  прошивки не нужен — он нужен только для чтения UART.
 - AT32: `make` и `arm-none-eabi-gcc` (на Windows — MSYS2).
 
 ## Установка
@@ -68,6 +74,9 @@ dsh plugin --profile web add /путь/к/board-lab
 - `python` — явный интерпретатор, если PlatformIO стоит нестандартно.
 
 ## Проверки
+
+Быстрый старт на новой машине — инструмент `board_doctor` (или кнопка «Проверить среду» в панели):
+он показывает, что найдено, а чего нет, и что поставить.
 
 ```bash
 node tests/client_smoke.mjs                    # регистрация панели, без браузера
