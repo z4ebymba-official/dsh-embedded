@@ -312,7 +312,7 @@ window.__ModuleLoader__.load({
           const data = await call('/board-lab/status')
           setStatus(data)
           setError(null)
-          setProject((current) => current || data.remembered?.[0]?.project || '')
+          setProject((current) => current || data.current?.project || data.remembered?.[0]?.project || '')
           setPort((current) => current || data.ports?.[0]?.path || '')
           if (Number.isInteger(data.defaultBaud)) setBaud(String(data.defaultBaud))
         } catch (cause) {
@@ -415,6 +415,29 @@ window.__ModuleLoader__.load({
           setBusy(null)
         }
       }, [append, refresh, t])
+
+      const chooseProject = useCallback(async (value) => {
+        setProject(value)
+        if (value === '') return
+        try {
+          const data = await call('/board-lab/project/select', { project: value })
+          if (data.ok !== false && data.current !== undefined) {
+            append('project', `${t('log.projectSelected')} ${data.current.path}`)
+          }
+          await refresh()
+        } catch (cause) {
+          append('project', `✖ ${cause instanceof Error ? cause.message : String(cause)}`, false)
+        }
+      }, [append, refresh, t])
+
+      const openProjectFolder = useCallback(async (target) => {
+        try {
+          const data = await call('/board-lab/project/open', { target })
+          append('project', `${t('log.folderOpened')} ${data.path}`)
+        } catch (cause) {
+          append('project', `✖ ${cause instanceof Error ? cause.message : String(cause)}`, false)
+        }
+      }, [append, t])
 
       const startMonitor = useCallback(async () => {
         if (port === '') return
@@ -598,6 +621,7 @@ window.__ModuleLoader__.load({
       const disabled = busy !== null
       const toolchain = status?.toolchain
       const ports = status?.ports ?? []
+      const current = status?.current
       const chip = ports.find((item) => item.path === port)
       const factsReady = facts !== null && facts.chip !== undefined
       const deviceRows = [
@@ -653,7 +677,7 @@ window.__ModuleLoader__.load({
                   h('select', {
                     style: S.input,
                     value: project,
-                    onChange: (event) => setProject(event.target.value),
+                    onChange: (event) => { chooseProject(event.target.value) },
                   },
                     h('option', { value: '' }, t('field.projectAuto')),
                     (status?.projects ?? []).map((item) => h('option', { key: item.path, value: item.path }, `${item.name} (${item.kind})`)),
@@ -803,6 +827,34 @@ window.__ModuleLoader__.load({
           h('aside', { style: S.rail },
             h('section', { style: S.card },
               h('div', { style: S.cardHead },
+                h('span', { style: S.kicker }, t('section.project')),
+                h('div', { style: S.spacer }),
+                current !== undefined
+                  ? h('span', { style: { ...S.hint, fontSize: 11 } }, t('project.current'))
+                  : null,
+              ),
+              current === undefined
+                ? h('div', { style: S.hint }, t('project.none'))
+                : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+                    h('div', { style: S.fact },
+                      h('span', { style: S.factLabel }, t('project.folder')),
+                      h('span', { style: { ...S.monoValue, ...S.nowrap }, title: current.dir }, current.name)),
+                    h('div', { style: S.fact },
+                      h('span', { style: S.factLabel }, t('project.path')),
+                      h('span', { style: { ...S.monoValue, ...S.nowrap }, title: current.dir }, current.dir)),
+                    h('div', { style: S.fact },
+                      h('span', { style: S.factLabel }, t('project.board')),
+                      h('span', { style: S.factValue }, [current.board, current.env === undefined ? undefined : `env ${current.env}`].filter(Boolean).join(' · ') || t('device.unknown'))),
+                  ),
+              h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+                button(S.ghost, disabled || current === undefined, { onClick: () => openProjectFolder('root') }, t('action.openFolder')),
+                button(S.ghost, disabled || current === undefined, { onClick: () => openProjectFolder('lib') }, t('action.openLib')),
+              ),
+              h('div', { style: S.hint }, t('project.hint')),
+            ),
+
+            h('section', { style: S.card },
+              h('div', { style: S.cardHead },
                 h('span', { style: S.kicker }, t('device.title')),
                 h('div', { style: S.spacer }),
                 factsReady
@@ -869,6 +921,7 @@ window.__ModuleLoader__.load({
         'panel.title': 'Board lab',
         'panel.subtitle': 'Build, flash and watch the device without unplugging it.',
         'section.connection': 'Board',
+        'section.project': 'Project',
         'section.quick': 'Commands',
         'section.test': 'Scenario run',
         'device.title': 'Device',
@@ -910,6 +963,16 @@ window.__ModuleLoader__.load({
         'action.send': 'Send',
         'field.project': 'Project',
         'field.projectAuto': 'auto-detect from board',
+        'project.current': 'current',
+        'project.none': 'No project selected yet. Pick one above or press “Detect board”.',
+        'project.folder': 'Folder',
+        'project.path': 'Path',
+        'project.board': 'Board',
+        'project.hint': 'Drop libraries into lib/ — PlatformIO picks them up on the next build.',
+        'action.openFolder': 'Open folder',
+        'action.openLib': 'Libraries',
+        'log.projectSelected': 'current project:',
+        'log.folderOpened': 'opened:',
         'field.port': 'Serial port',
         'field.auto': 'auto',
         'field.baud': 'Baud',
@@ -951,6 +1014,7 @@ window.__ModuleLoader__.load({
         'panel.title': 'Лаборатория плат',
         'panel.subtitle': 'Сборка, прошивка и живой UART — не отключая плату.',
         'section.connection': 'Плата',
+        'section.project': 'Проект',
         'section.quick': 'Команды',
         'section.test': 'Прогон сценария',
         'device.title': 'Устройство',
@@ -992,6 +1056,16 @@ window.__ModuleLoader__.load({
         'action.send': 'Отправить',
         'field.project': 'Проект',
         'field.projectAuto': 'автоопределение по плате',
+        'project.current': 'текущий',
+        'project.none': 'Проект ещё не выбран. Выберите выше или нажмите «Определить плату».',
+        'project.folder': 'Папка',
+        'project.path': 'Путь',
+        'project.board': 'Плата',
+        'project.hint': 'Кидайте библиотеки в lib/ — PlatformIO подхватит их при следующей сборке.',
+        'action.openFolder': 'Открыть папку',
+        'action.openLib': 'Библиотеки',
+        'log.projectSelected': 'текущий проект:',
+        'log.folderOpened': 'открыто:',
         'field.port': 'Порт',
         'field.auto': 'авто',
         'field.baud': 'Скорость',

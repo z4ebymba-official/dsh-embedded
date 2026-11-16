@@ -505,7 +505,8 @@ export function apply(ctx, config = {}) {
     const envs = kind === 'pio' ? pioEnvs(dir) : []
     const families = [...new Set(envs.map((env) => env.family).filter(Boolean))]
     if (kind === 'make') families.push('at32')
-    return { name: dir.split('/').filter(Boolean).pop() ?? dir, path, dir, kind, envs, families }
+    const name = dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? dir
+    return { name, path, dir, kind, envs, families }
   }
 
   /** Where the scenario runner writes its reports. */
@@ -513,6 +514,104 @@ export function apply(ctx, config = {}) {
     if (dir === projectsRoot) return settings.projectsDir
     if (dir.startsWith(`${projectsRoot}/`)) return `${settings.projectsDir}/${dir.slice(projectsRoot.length + 1)}`
     return dir
+  }
+
+  // -------------------------------------------------------------- current project
+  // `firmware/<name>` is a plain folder the user can open and drop libraries
+  // into (`lib/`). Exactly one project is "current": the panel selects it, the
+  // agent reads it, and a bare `board_flash` never has to guess between two
+  // projects that target the same chip.
+
+  const currentFile = join(stateRoot, 'current.json')
+
+  function readCurrent() {
+    if (!existsSync(currentFile)) return undefined
+    try {
+      const parsed = JSON.parse(readFileSync(currentFile, 'utf8'))
+      if (typeof parsed?.project !== 'string' || parsed.project.trim() === '') return undefined
+      return {
+        project: parsed.project,
+        env: typeof parsed.env === 'string' && parsed.env !== '' ? parsed.env : undefined,
+        updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  function writeCurrent(value) {
+    mkdirSync(stateRoot, { recursive: true })
+    const temporary = `${currentFile}.${process.pid}.tmp`
+    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`)
+    renameSync(temporary, currentFile)
+  }
+
+  /** The current project with its environments, or undefined when it vanished. */
+  function currentProject() {
+    const saved = readCurrent()
+    if (saved === undefined) return undefined
+    let summary
+    try {
+      summary = projectSummary(saved.project)
+    } catch {
+      return undefined
+    }
+    const env = saved.env !== undefined && summary.envs.some((item) => item.name === saved.env)
+      ? saved.env
+      : summary.envs.find((item) => item.default === true)?.name ?? summary.envs[0]?.name
+    const board = summary.envs.find((item) => item.name === env)?.board ?? summary.envs[0]?.board
+    return {
+      project: summary.path,
+      name: summary.name,
+      path: summary.path,
+      dir: summary.dir,
+      kind: summary.kind,
+      env,
+      board,
+      envs: summary.envs.map((item) => item.name),
+      families: summary.families,
+      updatedAt: saved.updatedAt,
+    }
+  }
+
+  function selectProject({ project, env } = {}) {
+    if (typeof project !== 'string' || project.trim() === '') {
+      throw new Error('Pass a project directory, for example "firmware/esp32s3-hello".')
+    }
+    const summary = projectSummary(project)
+    let chosen = env
+    if (chosen !== undefined && !summary.envs.some((item) => item.name === chosen)) {
+      throw new Error(`${summary.name} has no environment "${chosen}"; available: ${summary.envs.map((item) => item.name).join(', ') || 'none'}.`)
+    }
+    if (chosen === undefined) chosen = summary.envs.find((item) => item.default === true)?.name ?? summary.envs[0]?.name
+    writeCurrent({ project: summary.path, env: chosen, updatedAt: new Date().toISOString() })
+    return currentProject()
+  }
+
+  /** Open a project folder (or its lib/ or src/) in the desktop file manager. */
+  function openFolder({ project, target = 'root' } = {}) {
+    const current = project === undefined ? currentProject() : projectSummary(project)
+    if (current === undefined) throw new Error('No current project yet: select one first (board_project action "select").')
+    const path = target === 'root' ? current.dir : join(current.dir, target)
+    if (path !== current.dir && !path.startsWith(projectsRoot)) {
+      throw new Error(`Refusing to open ${path}: it is outside ${projectsRoot}.`)
+    }
+    if (target !== 'root' && !existsSync(path)) {
+      if (target === 'lib') mkdirSync(path, { recursive: true })
+      else throw new Error(`${projectLabel(current.dir)} has no ${target}/ folder yet.`)
+    }
+    const opener = isWindows
+      ? (existsSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'explorer.exe'))
+          ? join(process.env.SystemRoot ?? 'C:\\Windows', 'explorer.exe')
+          : 'explorer')
+      : process.platform === 'darwin'
+        ? 'open'
+        : hasCommand('xdg-open') ? 'xdg-open' : undefined
+    if (opener === undefined) throw new Error('No file manager launcher found: install xdg-open.')
+    const child = spawn(opener, [path], { detached: true, stdio: 'ignore', windowsHide: false })
+    child.on('error', () => {})
+    child.unref()
+    return { path, target, opener }
   }
 
   /** Newest ELF under `.pio/build/<env>` or `build`, preferring the named env. */
@@ -1178,14 +1277,26 @@ export function apply(ctx, config = {}) {
       dir = projectDir(project)
       kind = projectKind(dir)
     } else {
-      // No project named: ask the board. A remembered serial flashes without
-      // probing (no reset, no port churn); a new one is identified by esptool.
-      if (chosenPort === undefined) chosenPort = selectPort(undefined)
-      const resolved = await resolveProjectForPort(chosenPort)
-      dir = resolved.dir
-      kind = projectKind(dir)
-      project = resolved.project
-      env = env ?? resolved.env
+      // No project named: the pinned project is the answer when there is one,
+      // so a bare `board_flash` uses exactly what the panel shows. Otherwise ask
+      // the board; a remembered serial flashes without probing.
+      if (chosenPort === undefined) {
+        const pinned = currentProject()
+        if (pinned !== undefined) {
+          dir = pinned.dir
+          kind = pinned.kind
+          project = pinned.path
+          env = env ?? pinned.env
+        }
+      }
+      if (dir === undefined) {
+        if (chosenPort === undefined) chosenPort = selectPort(undefined)
+        const resolved = await resolveProjectForPort(chosenPort)
+        dir = resolved.dir
+        kind = projectKind(dir)
+        project = resolved.project
+        env = env ?? resolved.env
+      }
     }
     // A probe upload (ST-Link / J-Link / CMSIS-DAP / OpenOCD / DFU) needs no
     // serial port; serial bootloaders do. `upload_protocol` in platformio.ini
@@ -1500,6 +1611,12 @@ export function apply(ctx, config = {}) {
     if (options.probe === false) return undefined
     const identity = await identityForPort(port)
     const family = identity.family ?? chipFamily(identity.chip)
+    // The project the user pinned in the panel beats guessing between equal
+    // families: that is the whole point of a "current project".
+    const current = currentProject()
+    if (current !== undefined && (family === undefined || current.families.includes(family))) {
+      return { dir: current.dir, project: current.path, env: current.env, family, source: 'current' }
+    }
     const matches = projects.filter((project) => project.families.includes(family))
     if (matches.length === 1) {
       const match = matches[0]
@@ -1566,17 +1683,28 @@ export function apply(ctx, config = {}) {
             result.confidence = 'high'
             result.reason = `remembered from an earlier flash (chip ${identity.chip})`
             rememberBoard(key, { ...cached, family, chip: identity.chip })
-          } else if (matches.length === 1) {
-            result.project = matches[0].project
-            result.env = matches[0].envs[0]
-            result.confidence = 'high'
-            result.reason = `chip ${identity.chip} matches the only ${family} project`
-            rememberBoard(key, { project: result.project, env: result.env, family, chip: identity.chip })
-          } else if (matches.length > 1) {
-            result.confidence = 'medium'
-            result.reason = `${matches.length} projects build for ${family}; pass project explicitly`
           } else {
-            result.reason = `chip ${identity.chip} but no project builds for ${family}`
+            const pinned = currentProject()
+            if (pinned !== undefined && pinned.families.includes(family)) {
+              result.project = pinned.path
+              result.env = pinned.env
+              result.confidence = 'high'
+              result.reason = `current project for ${family} (selected in the panel)`
+            }
+          }
+          if (result.project === undefined) {
+            if (matches.length === 1) {
+              result.project = matches[0].project
+              result.env = matches[0].envs[0]
+              result.confidence = 'high'
+              result.reason = `chip ${identity.chip} matches the only ${family} project`
+              rememberBoard(key, { project: result.project, env: result.env, family, chip: identity.chip })
+            } else if (matches.length > 1) {
+              result.confidence = 'medium'
+              result.reason = `${matches.length} projects build for ${family}; pass project explicitly or select one in the panel`
+            } else {
+              result.reason = `chip ${identity.chip} but no project builds for ${family}`
+            }
           }
         } else {
           result.reason = `chip ${identity.chip ?? 'unknown'}: no family mapping`
@@ -1950,6 +2078,114 @@ export function apply(ctx, config = {}) {
           port: typeof args.port === 'string' && args.port.trim() !== '' ? args.port.trim() : undefined,
           protocol: typeof args.protocol === 'string' && args.protocol.trim() !== '' ? args.protocol.trim() : undefined,
         })
+      },
+    },
+    {
+      name: 'board_project',
+      description:
+        'The current firmware project: status shows the pinned project and its board/environments, list shows every project with the current one marked, select pins one (the panel and a project-less `board_flash` then use it), open reveals its folder in the desktop file manager — drop libraries into `lib/` there. Use select before flashing when several projects target the same board and the user means a specific one.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['action'],
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['status', 'list', 'select', 'open'],
+            description: 'status — current project; list — all projects; select — pin one; open — show its folder.',
+          },
+          project: { ...PROJECT_PARAM, description: 'Project directory for select/open — absolute, or relative to the workspace root.' },
+          env: { ...ENV_PARAM, description: 'PlatformIO environment for the project (select). Omit to use its default env.' },
+          target: {
+            type: 'string',
+            enum: ['root', 'lib', 'src'],
+            description: 'Folder to open (open): the project root by default, or its lib/ (created) or src/.',
+          },
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ok'],
+          properties: {
+            ok: { type: 'boolean' },
+            current: {
+              type: 'object',
+              properties: {
+                project: { type: 'string' },
+                name: { type: 'string' },
+                path: { type: 'string' },
+                dir: { type: 'string' },
+                kind: { type: 'string' },
+                env: { type: 'string' },
+                board: { type: 'string' },
+                envs: { type: 'array', items: { type: 'string' } },
+                families: { type: 'array', items: { type: 'string' } },
+              },
+            },
+            projects: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['name', 'path', 'kind'],
+                properties: {
+                  name: { type: 'string' },
+                  path: { type: 'string' },
+                  kind: { type: 'string' },
+                  board: { type: 'string' },
+                  families: { type: 'array', items: { type: 'string' } },
+                  current: { type: 'boolean' },
+                },
+              },
+            },
+            path: { type: 'string' },
+            target: { type: 'string' },
+          },
+        },
+        render: (_args, value) => {
+          if (value.current !== undefined) {
+            const board = value.current.board === undefined ? '' : ` · board ${value.current.board}`
+            const env = value.current.env === undefined ? '' : ` · env ${value.current.env}`
+            const text = `current: ${value.current.path}${board}${env}\n${value.current.dir}`
+            return [{ type: 'text', text: value.projects === undefined ? text : `${text}\n\n${value.projects.map((p) => `${p.current === true ? '*' : ' '} ${p.path} (${p.kind})`).join('\n')}` }]
+          }
+          if (value.projects !== undefined) {
+            return [{ type: 'text', text: value.projects.map((p) => `${p.current === true ? '*' : ' '} ${p.path} (${p.kind})`).join('\n') }]
+          }
+          return [{ type: 'text', text: value.path === undefined ? 'no current project' : `opened ${value.path}` }]
+        },
+      },
+      async execute(args) {
+        const action = String(args.action ?? 'status')
+        if (action === 'status') return compact({ ok: true, current: currentProject() })
+        if (action === 'list') {
+          const current = currentProject()
+          const projects = listProjects().map((item) => {
+            const summary = projectSummary(item.path)
+            return compact({
+              name: item.name,
+              path: item.path,
+              kind: item.kind,
+              board: summary.envs.find((env) => env.default === true)?.board ?? summary.envs[0]?.board,
+              families: summary.families,
+              current: current?.project === item.path,
+            })
+          })
+          return compact({ ok: true, current, projects })
+        }
+        if (action === 'select') {
+          return compact({ ok: true, current: selectProject({ project: args.project, env: typeof args.env === 'string' && args.env.trim() !== '' ? args.env.trim() : undefined }) })
+        }
+        if (action === 'open') {
+          const opened = openFolder({
+            project: typeof args.project === 'string' && args.project.trim() !== '' ? args.project : undefined,
+            target: typeof args.target === 'string' ? args.target : 'root',
+          })
+          return compact({ ok: true, current: currentProject(), path: opened.path, target: opened.target })
+        }
+        throw new Error(`Unknown action "${action}"; use status, list, select or open.`)
       },
     },
     {
@@ -2568,6 +2804,7 @@ export function apply(ctx, config = {}) {
     const routes = [
       handle('GET', '/board-lab/status', async () => ({
         projects: listProjects(),
+        current: currentProject(),
         ports: attachedPorts(),
         monitors: listMonitors(),
         // Cached ports only: no probing, so opening the panel never resets a board.
@@ -2588,6 +2825,18 @@ export function apply(ctx, config = {}) {
       })),
       handle('GET', '/board-lab/ports', async () => ({ ports: attachedPorts() })),
       handle('GET', '/board-lab/projects', async () => ({ projects: listProjects() })),
+      handle('GET', '/board-lab/project', async () => ({ current: currentProject(), projects: listProjects() })),
+      handle('POST', '/board-lab/project/select', async (body) => ({
+        ok: true,
+        current: selectProject({ project: body.project, env: typeof body.env === 'string' ? body.env : undefined }),
+      })),
+      handle('POST', '/board-lab/project/open', async (body) => ({
+        ok: true,
+        ...openFolder({
+          project: typeof body.project === 'string' && body.project !== '' ? body.project : undefined,
+          target: typeof body.target === 'string' ? body.target : 'root',
+        }),
+      })),
       handle('POST', '/board-lab/build', async (body) => buildOp({
         project: body.project,
         env: typeof body.env === 'string' ? body.env : undefined,

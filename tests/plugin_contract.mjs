@@ -437,6 +437,23 @@ while True:
   }
 }
 
+// ------------------------------------------------------- current project pin
+// The panel and a project-less board_flash both read this pin; the test keeps it
+// inside STATE_DIR so the real workspace is untouched.
+{
+  const before = await call('board_project', { action: 'status' })
+  if (before.current !== undefined) fail(`project: expected no current project, got ${before.current.path}`)
+  const listed = await call('board_project', { action: 'list' })
+  if (listed.projects.length === 0) fail('project: list returned no projects')
+  const selected = await call('board_project', { action: 'select', project: 'firmware/esp32s3-hello' })
+  if (selected.current?.path !== 'firmware/esp32s3-hello') fail(`project: select returned ${JSON.stringify(selected.current)}`)
+  const after = await call('board_project', { action: 'status' })
+  if (after.current?.path !== 'firmware/esp32s3-hello') fail(`project: status did not keep the pin (${JSON.stringify(after.current)})`)
+  const marked = await call('board_project', { action: 'list' })
+  if (marked.projects.filter((item) => item.current === true).length !== 1) fail('project: list must mark exactly one current project')
+  console.log(`project: current=${after.current.path} env=${after.current.env}`)
+}
+
 rmSync(STATE_DIR, { recursive: true, force: true })
 
 if (problems.length > 0) {
