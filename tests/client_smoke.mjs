@@ -84,6 +84,7 @@ mod.apply(ctx)
 
 const main = registrations.find((item) => item.name === 'main' && item.key === 'board-lab')
 const sidebar = registrations.find((item) => item.name === 'sidebar.panellist' && item.id === 'board-lab')
+const settings = registrations.find((item) => item.name === 'settings.section' && item.id === 'board-lab')
 
 if (main === undefined) {
   console.error('FAIL: no main panel registration for board-lab')
@@ -93,5 +94,9 @@ if (sidebar === undefined) {
   console.error('FAIL: no sidebar entry registration for board-lab')
   process.exit(1)
 }
+if (settings === undefined) {
+  console.error('FAIL: no settings section registration for board-lab')
+  process.exit(1)
+}
 
-console.log('OK: registered main key "board-lab" and sidebar entry "board-lab"')
+console.log('OK: registered main key "board-lab", sidebar entry and settings section "board-lab"')

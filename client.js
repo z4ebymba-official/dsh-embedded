@@ -262,6 +262,229 @@ window.__ModuleLoader__.load({
       return h('span', { style: S.stat, title }, h('span', { style: S.dot(color) }), label)
     }
 
+    const TS = {
+      page: {
+        height: '100%',
+        overflow: 'auto',
+        boxSizing: 'border-box',
+        padding: '20px 24px 28px',
+        background: 'var(--dsw-alias-bg-base)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+      },
+      inner: { maxWidth: 780, display: 'flex', flexDirection: 'column', gap: 14 },
+      header: { display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' },
+      title: { margin: 0, fontSize: 18, fontWeight: 650, letterSpacing: '-0.01em', lineHeight: '24px' },
+      lead: { margin: '4px 0 0', fontSize: 12.5, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)', maxWidth: 520 },
+      headerRight: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 },
+      count: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' },
+      group: {
+        display: 'flex',
+        flexDirection: 'column',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: 'var(--dsw-alias-bg-base)',
+      },
+      groupTitle: {
+        padding: '6px 12px',
+        fontSize: 10.5,
+        fontWeight: 600,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: 'var(--dsw-alias-label-secondary)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+      },
+      row: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '9px 12px',
+        borderTop: '1px solid var(--dsw-alias-border-l1)',
+        minHeight: 40,
+        boxSizing: 'border-box',
+      },
+      dot: (color) => ({ width: 8, height: 8, borderRadius: 999, background: color, flex: '0 0 auto' }),
+      grow: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 },
+      nameLine: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
+      name: { fontSize: 12.5, fontWeight: 550 },
+      meta: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)' },
+      state: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' },
+      pick: { display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap', cursor: 'pointer' },
+      footer: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+      primary: {
+        height: 30,
+        padding: '0 14px',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-label-primary)',
+        background: 'var(--dsw-alias-label-primary)',
+        color: 'var(--dsw-alias-bg-base)',
+        font: 'inherit',
+        fontSize: 12.5,
+        fontWeight: 600,
+        cursor: 'pointer',
+      },
+      ghost: {
+        height: 28,
+        padding: '0 11px',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: 12,
+        cursor: 'pointer',
+      },
+      hint: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)' },
+      error: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)', lineHeight: '17px' },
+      log: {
+        margin: 0,
+        maxHeight: 220,
+        overflow: 'auto',
+        padding: '8px 10px',
+        borderRadius: 6,
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        fontFamily: MONO,
+        fontSize: 11,
+        lineHeight: '16px',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+      },
+    }
+
+    const TOOL_GROUPS = ['core', 'common', 'esp32', 'avr', 'stm32', 'at32']
+
+    function ToolSettingsPage() {
+      const t = useMemo(() => (key) => translate(key), [])
+      const [data, setData] = useState(null)
+      const [error, setError] = useState(null)
+      const [picked, setPicked] = useState([])
+      const [busy, setBusy] = useState(false)
+      const [logOpen, setLogOpen] = useState(false)
+
+      const load = useCallback(async () => {
+        try {
+          const next = await call('/board-lab/tools')
+          setData(next)
+          setError(null)
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }, [])
+
+      useEffect(() => {
+        void load()
+      }, [load])
+
+      const install = data?.install
+      const running = install?.running === true
+      useEffect(() => {
+        if (!running) return undefined
+        const timer = window.setInterval(() => { void load() }, 1200)
+        return () => window.clearInterval(timer)
+      }, [running, load])
+
+      const rows = data?.tools ?? []
+      const missing = rows.filter((row) => row.ok !== true)
+      const results = new Map((install?.results ?? []).map((entry) => [entry.id, entry]))
+      const statusColor = (value) => value === 'done'
+        ? 'var(--dsw-alias-state-success-primary)'
+        : value === 'failed'
+          ? 'var(--dsw-alias-state-error-primary)'
+          : 'var(--dsw-alias-state-warn-primary)'
+
+      const toggle = (id) => {
+        setPicked((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])
+      }
+
+      const startInstall = async () => {
+        if (picked.length === 0 || busy || running) return
+        setBusy(true)
+        setError(null)
+        try {
+          await call('/board-lab/tools/install', { ids: picked })
+          setPicked([])
+          await load()
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const groupRows = (group) => rows.filter((row) => row.group === group)
+
+      return h('div', { style: TS.page },
+        h('div', { style: TS.inner },
+          h('div', { style: TS.header },
+            h('div', { style: { minWidth: 0 } },
+              h('h2', { style: TS.title }, t('settings.title')),
+              h('p', { style: TS.lead }, t('tools.lead')),
+            ),
+            h('div', { style: TS.headerRight },
+              data === null
+                ? null
+                : h('span', { style: TS.count }, t('tools.count').replace('{done}', String(data.installed ?? 0)).replace('{total}', String(data.total ?? 0))),
+              button(TS.ghost, busy || running, { type: 'button', onClick: () => { void load() } }, t('tools.refresh')),
+            ),
+          ),
+          error === null ? null : h('div', { style: TS.error }, t('tools.error').replace('{message}', error)),
+          ...TOOL_GROUPS
+            .filter((group) => groupRows(group).length > 0)
+            .map((group) => h('div', { key: group, style: TS.group },
+              h('div', { style: TS.groupTitle }, t(`tools.section.${group}`)),
+              groupRows(group).map((row) => {
+                const result = results.get(row.id)
+                const queued = picked.includes(row.id)
+                const color = row.ok === true
+                  ? 'var(--dsw-alias-state-success-primary)'
+                  : result === undefined
+                    ? 'var(--dsw-alias-state-error-primary)'
+                    : statusColor(result.status)
+                return h('div', { key: row.id, style: TS.row },
+                  h('span', { style: TS.dot(color) }),
+                  h('div', { style: TS.grow },
+                    h('div', { style: TS.nameLine },
+                      h('span', { style: TS.name }, row.name),
+                      row.version === undefined ? null : h('span', { style: TS.meta }, row.version),
+                      h('span', { style: TS.meta }, t(`tools.kind.${row.kind}`)),
+                    ),
+                    result === undefined
+                      ? null
+                      : h('span', { style: { ...TS.meta, color: statusColor(result.status) } },
+                        t(`tools.status.${result.status}`) + (result.detail === undefined ? '' : ` — ${result.detail}`)),
+                  ),
+                  row.ok === true
+                    ? h('span', { style: TS.state }, t('tools.installed'))
+                    : h('label', { style: TS.pick },
+                      h('input', { type: 'checkbox', checked: queued, disabled: running, onChange: () => toggle(row.id) }),
+                      t('tools.pick')),
+                )
+              }),
+            )),
+          h('div', { style: TS.footer },
+            button(TS.primary, picked.length === 0 || busy || running, {
+              type: 'button',
+              onClick: () => { void startInstall() },
+            }, running ? t('tools.installing') : busy ? t('tools.installing') : t('tools.install')),
+            h('span', { style: TS.hint },
+              error !== null || data === null
+                ? ''
+                : missing.length === 0
+                  ? t('tools.hintEmpty')
+                  : picked.length === 0
+                    ? t('tools.hintPick')
+                    : t('tools.selected').replace('{n}', String(picked.length))),
+            install?.log
+              ? button(TS.ghost, false, { type: 'button', onClick: () => setLogOpen((value) => !value) }, logOpen ? t('tools.logHide') : t('tools.log'))
+              : null,
+          ),
+          logOpen && install?.log ? h('pre', { style: TS.log }, install.log) : null,
+        ),
+      )
+    }
+
     function BoardLabPage() {
       const t = useMemo(() => (key) => translate(key), [])
       const [status, setStatus] = useState(null)
@@ -919,6 +1142,34 @@ window.__ModuleLoader__.load({
     const DICTIONARIES = {
       en: {
         'panel.title': 'Board lab',
+        'settings.title': 'Board tools',
+        'tools.lead': 'What is installed on this machine and what the agent still needs to build and flash boards.',
+        'tools.count': '{done} of {total} installed',
+        'tools.refresh': 'Refresh',
+        'tools.install': 'Download selected',
+        'tools.installing': 'Installing…',
+        'tools.selected': '{n} selected',
+        'tools.pick': 'add',
+        'tools.installed': 'installed',
+        'tools.hintEmpty': 'Everything the agent needs is installed.',
+        'tools.hintPick': 'Tick the missing tools, then download them in one go.',
+        'tools.log': 'Details',
+        'tools.logHide': 'Hide details',
+        'tools.error': 'Could not read the tool list: {message}',
+        'tools.kind.pip': 'pip package',
+        'tools.kind.platform': 'PlatformIO platform',
+        'tools.kind.tool': 'PlatformIO tool',
+        'tools.kind.toolchain': 'toolchain',
+        'tools.status.queued': 'queued',
+        'tools.status.running': 'installing…',
+        'tools.status.done': 'done',
+        'tools.status.failed': 'failed',
+        'tools.section.core': 'Core',
+        'tools.section.common': 'Common',
+        'tools.section.esp32': 'ESP32',
+        'tools.section.avr': 'Arduino AVR',
+        'tools.section.stm32': 'STM32',
+        'tools.section.at32': 'AT32 / ARM',
         'panel.subtitle': 'Build, flash and watch the device without unplugging it.',
         'section.connection': 'Board',
         'section.project': 'Project',
@@ -1012,6 +1263,34 @@ window.__ModuleLoader__.load({
       },
       ru: {
         'panel.title': 'Лаборатория плат',
+        'settings.title': 'Инструменты для плат',
+        'tools.lead': 'Что установлено на этой машине и чего не хватает агенту, чтобы собирать и прошивать платы.',
+        'tools.count': 'Установлено {done} из {total}',
+        'tools.refresh': 'Обновить',
+        'tools.install': 'Скачать выбранные',
+        'tools.installing': 'Скачиваю…',
+        'tools.selected': 'Выбрано: {n}',
+        'tools.pick': 'добавить',
+        'tools.installed': 'установлено',
+        'tools.hintEmpty': 'Всё необходимое агенту уже установлено.',
+        'tools.hintPick': 'Отметьте недостающие инструменты и скачайте их разом.',
+        'tools.log': 'Подробности',
+        'tools.logHide': 'Скрыть подробности',
+        'tools.error': 'Не удалось прочитать список инструментов: {message}',
+        'tools.kind.pip': 'pip-пакет',
+        'tools.kind.platform': 'платформа PlatformIO',
+        'tools.kind.tool': 'инструмент PlatformIO',
+        'tools.kind.toolchain': 'тулчейн',
+        'tools.status.queued': 'в очереди',
+        'tools.status.running': 'ставится…',
+        'tools.status.done': 'готово',
+        'tools.status.failed': 'ошибка',
+        'tools.section.core': 'Основа',
+        'tools.section.common': 'Общее',
+        'tools.section.esp32': 'ESP32',
+        'tools.section.avr': 'Arduino AVR',
+        'tools.section.stm32': 'STM32',
+        'tools.section.at32': 'AT32 / ARM',
         'panel.subtitle': 'Сборка, прошивка и живой UART — не отключая плату.',
         'section.connection': 'Плата',
         'section.project': 'Проект',
@@ -1124,6 +1403,14 @@ window.__ModuleLoader__.load({
           key: 'board-lab',
           locale: NS,
         }, BoardLabPage))
+
+        ctx.slots.inject('settings.section', () => ctx.slots.register({
+          name: 'settings.section',
+          id: 'board-lab',
+          order: 60,
+          label: () => translate('settings.title'),
+          locale: NS,
+        }, ToolSettingsPage))
 
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist',

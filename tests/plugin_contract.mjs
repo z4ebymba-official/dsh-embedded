@@ -437,6 +437,17 @@ while True:
   }
 }
 
+// 11. Toolchain inventory: every catalog row exists and the answer is JSON.
+{
+  const inventory = await call('board_tools', { action: 'list' })
+  const ids = (inventory.tools ?? []).map((row) => row.id)
+  console.log(`tools: installed=${inventory.installed}/${inventory.total} python=${inventory.python} source=${inventory.source}`)
+  if (inventory.tools.length !== 11) fail(`tools: expected 11 catalog rows, got ${inventory.tools.length}`)
+  if (!ids.includes('platformio') || !ids.includes('esptool')) fail('tools: platformio/esptool rows are missing')
+  if (inventory.tools.some((row) => typeof row.ok !== 'boolean')) fail('tools: every row needs a boolean ok')
+  if (inventory.install?.running === true) fail('tools: an install was already running')
+}
+
 // ------------------------------------------------------- current project pin
 // The panel and a project-less board_flash both read this pin; the test keeps it
 // inside STATE_DIR so the real workspace is untouched.

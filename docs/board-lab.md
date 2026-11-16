@@ -17,6 +17,7 @@
 | `board_decode` | декодер паник: `Guru Meditation Error`, `abort()`, `assert failed`, `Backtrace`/`MCPC` → `addr2line` по ELF проекта: функция, файл, строка; печатает, какой ELF и когда собран |
 | `board_project` | текущий проект: `status` / `list` / `select` (закрепить) / `open` (открыть папку или `lib/` в файловом менеджере) |
 | `board_doctor` | проверить окружение машины и получить список «чего не хватает» |
+| `board_tools` | инвентарь инструментов/платформ (`list`), установка выбранных в фоне (`install`), прогресс (`status`) |
 | `board_detect` | определить плату: vid/pid → `esptool flash-id` → семейство чипа → подходящий проект и env из `firmware/*/platformio.ini`; кэш «порт → проект» в `.board-lab/boards.json` |
 | `board_test` | сценарный прогон по `board-tests.json` (`flash`, `build`, `watch`, `write`, `absent`, `reset`, `sleep`): шаги, тайминги, отчёт в `.board-lab/runs/<ts>/` |
 | `board_cycle` | `build → flash → start monitor → собрать вывод durationMs` (или до regex) |

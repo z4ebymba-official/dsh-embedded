@@ -97,6 +97,21 @@ const PORT_PARAM = {
   description: 'Serial port, e.g. /dev/ttyACM0. Omit to auto-select the only attached board.',
 }
 
+/** Toolchains a fresh machine needs; the panel settings page installs them on demand. */
+const TOOL_CATALOG = [
+  { id: 'platformio', name: 'PlatformIO Core', group: 'core', kind: 'pip', pkg: 'platformio', why: 'Build and upload for ESP32, AVR, STM32 and AT32.' },
+  { id: 'pyserial', name: 'pyserial', group: 'common', kind: 'pip', pkg: 'pyserial', module: 'serial', why: 'UART monitor and port listing.' },
+  { id: 'esptool', name: 'esptool', group: 'esp32', kind: 'pip', pkg: 'esptool', why: 'ESP32 chip info, erase and upload fallback.' },
+  { id: 'espressif32', name: 'Platform espressif32', group: 'esp32', kind: 'platform', pkg: 'espressif32', why: 'ESP32/S2/S3 compilers and frameworks.' },
+  { id: 'atmelavr', name: 'Platform atmelavr', group: 'avr', kind: 'platform', pkg: 'atmelavr', why: 'Arduino Uno/Nano/Mega compilers and avrdude.' },
+  { id: 'avrdude', name: 'avrdude', group: 'avr', kind: 'tool', pkg: 'tool-avrdude', why: 'Upload to Arduino AVR boards.' },
+  { id: 'ststm32', name: 'Platform ststm32', group: 'stm32', kind: 'platform', pkg: 'ststm32', why: 'STM32 compilers and frameworks.' },
+  { id: 'stlink', name: 'ST-Link tools', group: 'stm32', kind: 'tool', pkg: 'tool-stlink', why: 'ST-Link probes: st-flash and st-info.' },
+  { id: 'dfu', name: 'dfu-util', group: 'stm32', kind: 'tool', pkg: 'tool-dfuutil', why: 'STM32/AT32 DFU uploads.' },
+  { id: 'openocd', name: 'OpenOCD', group: 'at32', kind: 'tool', pkg: 'tool-openocd', why: 'ST-Link/CMSIS-DAP uploads for AT32 and STM32.' },
+  { id: 'armgcc', name: 'ARM GCC', group: 'at32', kind: 'tool', pkg: 'toolchain-gccarmnoneeabi', why: 'AT32 and Makefile projects (arm-none-eabi-gcc).' },
+]
+
 /** Symbolized panic frames, shared by board_decode and board_watch. */
 const DECODE_SCHEMA = {
   type: 'object',
@@ -1791,7 +1806,144 @@ export function apply(ctx, config = {}) {
     }
   }
 
+
+  // --------------------------------------------------------------- toolchain
+  // The settings page and board_tools show what a fresh machine still misses
+  // and install the selection in one background run.
+
+  const packagesRoot = () => join(workspacePio ? join(toolchainDir, 'pio') : platformioCoreDir(), 'packages')
+  const platformsRoot = () => join(workspacePio ? join(toolchainDir, 'pio') : platformioCoreDir(), 'platforms')
+
+  function installedDir(root, name) {
+    try {
+      return readdirSync(root).find((entry) => entry === name || entry.startsWith(`${name}@`))
+    } catch {
+      return undefined
+    }
+  }
+
+  async function toolInventory() {
+    const python = pythonCommand()
+    const rows = []
+    const add = (row) => rows.push(compact(row))
+
+    let pioVersion
+    try {
+      const probe = await runPio(['--version'], { timeoutMs: 20_000 })
+      pioVersion = clean(probe.stdout).trim().split(/\r?\n/)[0]
+      add({ id: 'platformio', name: 'PlatformIO Core', group: 'core', kind: 'pip', ok: probe.ok === true, version: probe.ok === true ? pioVersion : undefined, why: TOOL_CATALOG[0].why, detail: probe.ok === true ? `via ${python.command}` : tail(clean(`${probe.stdout}\n${probe.stderr}`), 500) })
+    } catch (error) {
+      add({ id: 'platformio', name: 'PlatformIO Core', group: 'core', kind: 'pip', ok: false, why: TOOL_CATALOG[0].why, detail: error instanceof Error ? error.message : String(error) })
+    }
+
+    const probeModule = async (id, args) => {
+      const row = TOOL_CATALOG.find((item) => item.id === id)
+      try {
+        const result = await runPython(args, { timeoutMs: 20_000 })
+        const version = clean(result.stdout).trim().split(/\r?\n/)[0]
+        add({ id, name: row.name, group: row.group, kind: row.kind, ok: result.ok === true, version: result.ok === true ? version : undefined, why: row.why, detail: result.ok === true ? undefined : tail(clean(`${result.stdout}\n${result.stderr}`), 500) })
+      } catch (error) {
+        add({ id, name: row.name, group: row.group, kind: row.kind, ok: false, why: row.why, detail: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    await probeModule('pyserial', ['-c', 'import serial; print(serial.VERSION)'])
+    await probeModule('esptool', ['-m', 'esptool', 'version'])
+
+    for (const row of TOOL_CATALOG) {
+      if (row.kind !== 'tool' && row.kind !== 'platform') continue
+      const dir = installedDir(row.kind === 'tool' ? packagesRoot() : platformsRoot(), row.pkg)
+      const version = dir !== undefined && dir.includes('@') ? dir.slice(dir.indexOf('@') + 1) : undefined
+      add({ id: row.id, name: row.name, group: row.group, kind: row.kind, ok: dir !== undefined, version, why: row.why, detail: dir !== undefined ? dir : `not found under ${row.kind === 'tool' ? packagesRoot() : platformsRoot()}` })
+    }
+
+    return {
+      ok: rows.every((row) => row.id === 'openocd' || row.id === 'stlink' || row.ok === true),
+      tools: rows,
+      installed: rows.filter((row) => row.ok === true).length,
+      total: rows.length,
+      python: python.command,
+      source: python.source,
+      install: installSnapshot(),
+    }
+  }
+
+  /** pip needs --target for the workspace site-packages; PlatformIO owns its own venv. */
+  function pipArgs(pkg) {
+    const args = ['-m', 'pip', 'install', '--upgrade', '--disable-pip-version-check', '--no-warn-script-location']
+    if (workspacePython && pythonCommand().source !== 'platformio') args.push('--target', pythonLib)
+    args.push(pkg)
+    return args
+  }
+
+  const installState = {
+    running: false,
+    ids: [],
+    results: new Map(),
+    log: [],
+    startedAt: undefined,
+    finishedAt: undefined,
+  }
+
+  function installSnapshot() {
+    return compact({
+      running: installState.running,
+      ids: installState.ids,
+      startedAt: installState.startedAt,
+      finishedAt: installState.finishedAt,
+      results: [...installState.results.entries()].map(([id, value]) => ({ id, ...value })),
+      log: tail(installState.log.join('\n'), 20_000),
+    })
+  }
+
+  /** One-line-per-tool render shared by the panel and board_tools. */
+  function toolsText(value) {
+    const lines = (value.tools ?? []).map((row) => `${row.ok === true ? 'OK  ' : 'MISS'} ${row.name}${row.version === undefined ? '' : ` ${row.version}`}`)
+    const install = value.install
+    const progress = install?.running === true ? `installing: ${(install.ids ?? []).join(', ')}` : ''
+    return [`${value.installed ?? 0}/${value.total ?? 0} tool(s) present`, ...lines, progress].filter(Boolean).join('\n')
+  }
+
+  async function installToolsOp({ ids }) {
+    const requested = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []
+    const rows = requested
+      .map((id) => TOOL_CATALOG.find((row) => row.id === id))
+      .filter((row) => row !== undefined)
+    if (rows.length === 0) throw new Error('`ids` must list tool ids from the inventory')
+    if (installState.running) throw new Error('an install is already running; wait for it to finish')
+    installState.running = true
+    installState.ids = rows.map((row) => row.id)
+    installState.startedAt = Date.now()
+    installState.finishedAt = undefined
+    installState.results = new Map(rows.map((row) => [row.id, { status: 'queued' }]))
+    installState.log = []
+    const order = new Map(TOOL_CATALOG.map((row, index) => [row.id, index]))
+    const queue = [...rows].sort((left, right) => order.get(left.id) - order.get(right.id))
+    void (async () => {
+      for (const row of queue) {
+        installState.results.set(row.id, { status: 'running' })
+        const command = row.kind === 'pip' ? { tool: 'pip', args: pipArgs(row.pkg) } : { tool: 'pio', args: ['pkg', 'install', '-g', row.kind === 'tool' ? '-t' : '-p', row.pkg] }
+        installState.log.push(`\n[${row.id}] ${command.tool} ${command.args.join(' ')}`)
+        try {
+          const result = command.tool === 'pio'
+            ? await runPio(command.args, { timeoutMs: 900_000, maxOutputBytes: 200_000 })
+            : await runPython(command.args, { timeoutMs: 900_000, maxOutputBytes: 200_000 })
+          installState.log.push(tail(clean(`${result.stdout}\n${result.stderr}`), 4000))
+          installState.results.set(row.id, compact({ status: result.ok === true ? 'done' : 'failed', durationMs: result.durationMs, detail: result.ok === true ? undefined : tail(clean(`${result.stdout}\n${result.stderr}`), 500) }))
+          if (row.kind === 'pip') forgetPorts()
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          installState.log.push(message)
+          installState.results.set(row.id, { status: 'failed', detail: message })
+        }
+      }
+      installState.running = false
+      installState.finishedAt = Date.now()
+    })()
+    return { ok: true, ...installSnapshot() }
+  }
+
   /** Wait a window and fail if the pattern appears in new output. */
+
   async function absentOp({ port, pattern, withinMs = 3000, baud }) {
     if (typeof pattern !== 'string' || pattern.trim() === '') {
       throw new Error('`pattern` must be a non-empty regular expression')
@@ -2608,6 +2760,85 @@ export function apply(ctx, config = {}) {
       },
     },
     {
+      name: 'board_tools',
+      label: 'Board toolchain inventory',
+      description: 'Show which board toolchains this machine has (PlatformIO, pyserial, esptool, avrdude, ST-Link, OpenOCD, dfu-util, ARM GCC) and which PlatformIO platforms are installed (espressif32, atmelavr, ststm32), each with a version and the install plan. action "install" downloads the listed ids in the background; poll "status" for progress. Use it when a build or flash fails because a tool is missing.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { type: 'string', enum: ['list', 'install', 'status'] },
+          ids: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ok', 'tools'],
+          properties: {
+            ok: { type: 'boolean' },
+            installed: { type: 'integer' },
+            total: { type: 'integer' },
+            python: { type: 'string' },
+            source: { type: 'string' },
+            tools: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['id', 'name', 'ok'],
+                properties: {
+                  id: { type: 'string' },
+                  name: { type: 'string' },
+                  group: { type: 'string' },
+                  kind: { type: 'string' },
+                  ok: { type: 'boolean' },
+                  version: { type: 'string' },
+                  why: { type: 'string' },
+                  detail: { type: 'string' },
+                },
+              },
+            },
+            install: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                running: { type: 'boolean' },
+                startedAt: { type: 'integer' },
+                finishedAt: { type: 'integer' },
+                log: { type: 'string' },
+                ids: { type: 'array', items: { type: 'string' } },
+                results: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['id', 'status'],
+                    properties: {
+                      id: { type: 'string' },
+                      status: { type: 'string' },
+                      durationMs: { type: 'integer' },
+                      detail: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => [{ type: 'text', text: toolsText(value) }],
+      },
+      async execute(args) {
+        const action = args.action ?? 'list'
+        if (action === 'install') {
+          const started = await installToolsOp({ ids: args.ids })
+          return { ok: true, tools: [], installed: 0, total: 0, install: started }
+        }
+        return { ...(await toolInventory()), ok: true }
+      },
+    },
+    {
       name: 'board_detect',
       description:
         'Identify a connected board and suggest the project to flash: esptool reads the chip, the project platformio.ini environments map board names to chip families, and `.board-lab/boards.json` remembers ports flashed earlier. Returns chip, flash size, PSRAM, MAC, family, candidates and a confidence; a previous monitor is restarted, one that was off stays off. `board_flash` without `project` uses the same matching.',
@@ -2889,6 +3120,10 @@ export function apply(ctx, config = {}) {
         port: typeof body.port === 'string' ? body.port : undefined,
       })),
       handle('POST', '/board-lab/doctor', async () => doctorOp()),
+      handle('GET', '/board-lab/tools', async () => toolInventory()),
+      handle('POST', '/board-lab/tools/install', async (body) => installToolsOp({
+        ids: Array.isArray(body.ids) ? body.ids : [],
+      })),
       handle('POST', '/board-lab/test', async (body) => testOp({
         project: body.project,
         env: typeof body.env === 'string' ? body.env : undefined,
