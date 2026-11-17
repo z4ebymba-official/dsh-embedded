@@ -78,7 +78,13 @@ OpenOCD) и Artery AT32F403A/407 (GCC + Makefile, J-Link / ST-Link / CMSIS-DAP /
 
 ## Установка
 
-Из этой папки:
+Из npm (не нужен git):
+
+```bash
+dsh plugin --profile web add dsh-board-lab
+```
+
+Из этой папки или с GitHub:
 
 ```bash
 # Linux / macOS

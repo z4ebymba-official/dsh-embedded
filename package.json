@@ -1,9 +1,34 @@
 {
-  "name": "@local/board-lab",
-  "version": "0.12.0",
-  "private": true,
+  "name": "dsh-board-lab",
+  "version": "0.13.0",
   "type": "module",
   "description": "Build, flash and read UART logs for ESP32, AVR, STM32 and AT32 boards — the board tools, the Board lab panel and the «Плата-дев» agent preset",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "embedded",
+    "board",
+    "esp32",
+    "stm32",
+    "at32",
+    "avr",
+    "uart",
+    "platformio"
+  ],
+  "author": "z4ebymba-official",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/z4ebymba-official/dsh-embedded.git"
+  },
+  "homepage": "https://github.com/z4ebymba-official/dsh-embedded#readme",
+  "bugs": {
+    "url": "https://github.com/z4ebymba-official/dsh-embedded/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

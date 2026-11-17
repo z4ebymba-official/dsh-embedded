@@ -505,7 +505,7 @@ node tests/plugin_contract.mjs --port /dev/ttyACM0   # ещё и живая пл
 («Failed to load plugins») — так устроен boot-аудит. Восстановление:
 
 ```bash
-dsh plugin --profile web remove @local/board-lab
+dsh plugin --profile web remove dsh-board-lab
 ```
 
 Перед повторной установкой прогоняйте `tests/client_smoke.mjs` и `tests/ui_check.mjs`.
@@ -541,7 +541,7 @@ dsh plugin --profile web remove @local/board-lab
 
 Глобальные инструменты видны всем агентам, и пресет их не наследует сам —
 их приходится отсекать. Это делает `agents/restrict.js` (он же экспорт
-`@local/board-lab/agents/restrict`): `ctx.tools.restrict({ allow })` с белым
+`dsh-board-lab/agents/restrict`): `ctx.tools.restrict({ allow })` с белым
 списком из десяти `board_*`. Важные свойства `restrict()`:
 
 - фильтр применяется только к **унаследованным глобальным** инструментам

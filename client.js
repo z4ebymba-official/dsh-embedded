@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@local/board-lab',
+  id: 'dsh-board-lab',
   factory(require) {
     const React = require('react')
     const h = React.createElement

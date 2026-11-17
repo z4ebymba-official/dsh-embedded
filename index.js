@@ -1,5 +1,5 @@
 /**
- * @local/board-lab — the embedded closed loop for the dsh web profile.
+ * dsh-board-lab — the embedded closed loop for the dsh web profile.
  *
  * Host half:
  *   tools     board_ports / board_build / board_flash / board_monitor /
