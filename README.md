@@ -97,6 +97,24 @@ dsh plugin --profile web add /путь/к/board-lab
 
 После установки — перезапустить DSH. Панель появится в сайдбаре, инструменты `board_*` — у агента.
 
+### DSH Desktop
+
+Тот же bundle ставится в профиль Desktop-приложения: имя профиля подставь своё.
+
+```bash
+dsh plugin --profile desktop add /путь/к/board-lab
+# или прямо с GitHub
+dsh plugin --profile desktop add git+https://github.com/z4ebymba-official/dsh-embedded.git
+```
+
+Инструменты `board_*` живут на хосте и не зависят от веб-сервера: если у Desktop-профиля нет
+панельных маршрутов, плагин поднимается в режиме «только инструменты» (проверено на пакете,
+установленном в `node_modules`: 16 инструментов, без сервиса `webServer`). Панель «Лаборатория
+плат» и пресет «Плата-дев» приезжают вместе с пакетом — им нужен Web UI, который есть и в Desktop.
+PlatformIO, Python и `arm-none-eabi-gcc` в пакет не входят и не обязательны: без них
+`board_doctor` и `board_tools` честно скажут, чего не хватает, а остальные инструменты вернут
+понятную ошибку.
+
 ## Настройка
 
 Конфиг bundle-строки `board-lab` (в `cordis.patch.yml` или профиле):
