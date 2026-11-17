@@ -1,0 +1,303 @@
+{
+  "id": "stm32f103c8t6",
+  "name": "STM32F103C8T6",
+  "board": [
+    "stm32f103c8t6",
+    "stm32f103c8",
+    "bluepill-chip"
+  ],
+  "verified": false,
+  "note": "Imported from stm32-data; ring the pins out before marking it verified.",
+  "package": {
+    "kind": "qfp"
+  },
+  "pins": [
+    "VBAT",
+    {
+      "name": "PC13",
+      "func": [
+        "RTC_OUT",
+        "RTC_TAMPER"
+      ]
+    },
+    {
+      "name": "PC14",
+      "func": [
+        "RCC_OSC32_IN"
+      ]
+    },
+    {
+      "name": "PC15",
+      "func": [
+        "RCC_OSC32_OUT"
+      ]
+    },
+    {
+      "name": "PD0",
+      "func": [
+        "RCC_OSC_IN"
+      ]
+    },
+    {
+      "name": "PD1",
+      "func": [
+        "RCC_OSC_OUT"
+      ]
+    },
+    "NRST",
+    "VSSA",
+    "VDDA",
+    {
+      "name": "PA0",
+      "func": [
+        "ADC1_IN0",
+        "ADC2_IN0",
+        "TIM2_CH1",
+        "TIM2_ETR",
+        "USART2_CTS"
+      ]
+    },
+    {
+      "name": "PA1",
+      "func": [
+        "ADC1_IN1",
+        "ADC2_IN1",
+        "TIM2_CH2",
+        "USART2_RTS"
+      ]
+    },
+    {
+      "name": "PA2",
+      "func": [
+        "ADC1_IN2",
+        "ADC2_IN2",
+        "TIM2_CH3",
+        "USART2_TX"
+      ]
+    },
+    {
+      "name": "PA3",
+      "func": [
+        "ADC1_IN3",
+        "ADC2_IN3",
+        "TIM2_CH4",
+        "USART2_RX"
+      ]
+    },
+    {
+      "name": "PA4",
+      "func": [
+        "ADC1_IN4",
+        "ADC2_IN4",
+        "SPI1_NSS",
+        "USART2_CK"
+      ]
+    },
+    {
+      "name": "PA5",
+      "func": [
+        "ADC1_IN5",
+        "ADC2_IN5",
+        "SPI1_SCK"
+      ]
+    },
+    {
+      "name": "PA6",
+      "func": [
+        "ADC1_IN6",
+        "ADC2_IN6",
+        "SPI1_MISO",
+        "TIM1_BKIN",
+        "TIM3_CH1"
+      ]
+    },
+    {
+      "name": "PA7",
+      "func": [
+        "ADC1_IN7",
+        "ADC2_IN7",
+        "SPI1_MOSI",
+        "TIM1_CH1N",
+        "TIM3_CH2"
+      ]
+    },
+    {
+      "name": "PB0",
+      "func": [
+        "ADC1_IN8",
+        "ADC2_IN8",
+        "TIM1_CH2N",
+        "TIM3_CH3"
+      ]
+    },
+    {
+      "name": "PB1",
+      "func": [
+        "ADC1_IN9",
+        "ADC2_IN9",
+        "TIM1_CH3N",
+        "TIM3_CH4"
+      ]
+    },
+    "PB2",
+    {
+      "name": "PB10",
+      "func": [
+        "I2C2_SCL",
+        "TIM2_CH3",
+        "USART3_TX"
+      ]
+    },
+    {
+      "name": "PB11",
+      "func": [
+        "I2C2_SDA",
+        "TIM2_CH4",
+        "USART3_RX"
+      ]
+    },
+    "VSS",
+    "VDD",
+    {
+      "name": "PB12",
+      "func": [
+        "I2C2_SMBA",
+        "SPI2_NSS",
+        "TIM1_BKIN",
+        "USART3_CK"
+      ]
+    },
+    {
+      "name": "PB13",
+      "func": [
+        "SPI2_SCK",
+        "TIM1_CH1N",
+        "USART3_CTS"
+      ]
+    },
+    {
+      "name": "PB14",
+      "func": [
+        "SPI2_MISO",
+        "TIM1_CH2N",
+        "USART3_RTS"
+      ]
+    },
+    {
+      "name": "PB15",
+      "func": [
+        "SPI2_MOSI",
+        "TIM1_CH3N"
+      ]
+    },
+    {
+      "name": "PA8",
+      "func": [
+        "RCC_MCO",
+        "TIM1_CH1",
+        "USART1_CK"
+      ]
+    },
+    {
+      "name": "PA9",
+      "func": [
+        "TIM1_CH2",
+        "USART1_TX"
+      ]
+    },
+    {
+      "name": "PA10",
+      "func": [
+        "TIM1_CH3",
+        "USART1_RX"
+      ]
+    },
+    {
+      "name": "PA11",
+      "func": [
+        "CAN_RX",
+        "TIM1_CH4",
+        "USART1_CTS",
+        "USB_DM"
+      ]
+    },
+    {
+      "name": "PA12",
+      "func": [
+        "CAN_TX",
+        "TIM1_ETR",
+        "USART1_RTS",
+        "USB_DP"
+      ]
+    },
+    "PA13",
+    "VSS",
+    "VDD",
+    "PA14",
+    {
+      "name": "PA15",
+      "func": [
+        "SPI1_NSS",
+        "TIM2_CH1",
+        "TIM2_ETR"
+      ]
+    },
+    {
+      "name": "PB3",
+      "func": [
+        "SPI1_SCK",
+        "TIM2_CH2"
+      ]
+    },
+    {
+      "name": "PB4",
+      "func": [
+        "SPI1_MISO",
+        "TIM3_CH1"
+      ]
+    },
+    {
+      "name": "PB5",
+      "func": [
+        "I2C1_SMBA",
+        "SPI1_MOSI",
+        "TIM3_CH2"
+      ]
+    },
+    {
+      "name": "PB6",
+      "func": [
+        "I2C1_SCL",
+        "TIM4_CH1",
+        "USART1_TX"
+      ]
+    },
+    {
+      "name": "PB7",
+      "func": [
+        "I2C1_SDA",
+        "TIM4_CH2",
+        "USART1_RX"
+      ]
+    },
+    "BOOT0",
+    {
+      "name": "PB8",
+      "func": [
+        "CAN_RX",
+        "I2C1_SCL",
+        "TIM4_CH3"
+      ]
+    },
+    {
+      "name": "PB9",
+      "func": [
+        "CAN_TX",
+        "I2C1_SDA",
+        "TIM4_CH4"
+      ]
+    },
+    "VSS",
+    "VDD"
+  ]
+}

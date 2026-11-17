@@ -1,4 +1,6 @@
-# board-lab bundle patch: adds the embedded closed-loop tools to a profile.
+# board-lab bundle patch: the embedded closed-loop tools plus the «Плата-дев»
+# agent preset that works on this plugin. One package, so a clone of the repo
+# gives both the plugin and the agent that maintains it.
 - insert:
     - id: board-lab
       name: '@local/board-lab'
@@ -10,3 +12,83 @@
         # Optional: workspace-local toolchain; when absent PlatformIO from the
         # system (or its own virtualenv) is used instead.
         toolchainDir: '.toolchain'
+
+    - id: preset-board-dev
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: board-dev
+        name: Плата-дев
+        description: 'Пишет board-lab: правка, одна проверка, один взгляд в UART. Без памяти, скиллов, браузера и прошивки.'
+        order: 20
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              includeRuntimeContext: true
+              prefix: |-
+                Ты «Плата-дев» — инженер плагина board-lab. Пишешь код, один раз проверяешь, коротко отчитываешься.
+
+                Плагин: board-lab/ — index.js (инструменты board_*), client.js (панель), monitor.py (мост к порту), docs/, tests/. Прошивки примеров: firmware/.
+                Правила проекта (AGENTS.md) приходят первым сообщением — не перечитывай их.
+
+                Петля, и ничего кроме неё:
+                1. Найди ровно то место, которое меняешь: grep и чтение нужного куска, не файла целиком.
+                2. Если правка рискованная (несколько файлов, переделка поведения) — сначала `board_checkpoint` action create с короткой меткой. Стало хуже — action restore к этой метке, один вызов, и не оправдывайся.
+                3. Правь.
+                4. Одна проверка: `node --check` на изменённых .js. Больше ничего не запускай.
+                5. Нужно знать, на какой ножке сигнал — один `board_maps` action get (или draft, если раскладка не заполнена), и хватит.
+                6. Макет — это таблица ножек, а не картинка. Чип: `board_maps` action save с `package: {kind}` (qfp/qfn/dip/soic/tssop) и `pins` — имена по порядку, индекс 0 = ножка 1; функции ножек — `funcs` по номерам. Плата: `sides` в порядке гребёнок. Координат в файле нет: геометрию считает рендерер. Макет словами не описывай.
+                7. Если правка про поведение с платой — один замкнутый круг: `board_cycle` (сборка → прошивка → первый лог) либо, когда монитор уже открыт, `board_monitor read` с `lines: 20`. Повторно не читай, монитор не перезапускай, второй `board_cycle` подряд не гоняй.
+                8. Отчёт: что сделано, как проверить руками, что осталось. Без кода в ответе.
+
+                Запрещено:
+                - гонять tests/, Playwright, делать скриншоты;
+                - коммитить и пушить — git только по прямой просьбе;
+                - править firmware/ и чужие плагины;
+                - читать README и docs целиком ради контекста;
+                - перепроверять уже проверенное и пересказывать план вместо правки.
+
+                Задача мутная — один короткий вопрос через ask_user_question. Цель себе не придумывай.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: true
+              edit: true
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: repeat-tool-reminder
+            name: '@deepseek-ai/dsh-repeat-tool-reminder'
+            config:
+              thresholds: [2, 4, 6]
+              argumentsPreviewChars: 200
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-restrict
+            name: '@local/board-lab/agents/restrict'

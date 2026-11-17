@@ -14,7 +14,8 @@
  * (see tools/setup-toolchain.sh): no root, no writes to $HOME.
  */
 import { spawn } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { connect } from 'node:net'
 import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,6 +68,26 @@ function tail(text, limit) {
   return value.length <= limit ? value : `…\n${value.slice(value.length - limit)}`
 }
 
+/**
+ * Keep only the last `lines` lines of a monitor chunk.
+ *
+ * The read cursor has already advanced past the whole chunk, so the dropped
+ * part is gone on purpose: a debug read is one glance at the tail, not a
+ * transcript the agent re-reads until it runs out of context.
+ * @param {{ text?: string }} chunk
+ * @param {number} lines
+ */
+export function lastLines(chunk, lines) {
+  const text = typeof chunk.text === 'string' ? chunk.text : ''
+  if (text === '' || lines < 1) return chunk
+  const parts = text.split('\n')
+  const trailingBreak = parts[parts.length - 1] === ''
+  const rows = trailingBreak ? parts.slice(0, -1) : parts
+  if (rows.length <= lines) return chunk
+  const kept = rows.slice(-lines).join('\n')
+  return { ...chunk, text: trailingBreak ? `${kept}\n` : kept, droppedLines: rows.length - lines }
+}
+
 /** Read the first readable file from a list of candidates. */
 function readFirst(paths) {
   for (const file of paths) {
@@ -90,6 +111,39 @@ const PROJECT_PARAM = {
 const ENV_PARAM = {
   type: 'string',
   description: 'PlatformIO environment name; omit for the project default.',
+}
+
+/** Shape of one checkpoint row, shared by every action that returns them. */
+const CHECKPOINT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'project', 'createdAt', 'files', 'bytes'],
+  properties: {
+    id: { type: 'string' },
+    project: { type: 'string' },
+    name: { type: 'string' },
+    dir: { type: 'string' },
+    env: { type: 'string' },
+    label: { type: 'string' },
+    files: { type: 'integer' },
+    bytes: { type: 'integer' },
+    createdAt: { type: 'string' },
+    restoredAt: { type: 'string' },
+    guard: { type: 'boolean' },
+    /** Does this snapshot still equal the working tree, and what drifted. */
+    state: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        same: { type: 'boolean' },
+        changed: { type: 'integer' },
+        added: { type: 'integer' },
+        removed: { type: 'integer' },
+        other: { type: 'boolean' },
+        missing: { type: 'boolean' },
+      },
+    },
+  },
 }
 
 const PORT_PARAM = {
@@ -601,6 +655,849 @@ export function apply(ctx, config = {}) {
     if (chosen === undefined) chosen = summary.envs.find((item) => item.default === true)?.name ?? summary.envs[0]?.name
     writeCurrent({ project: summary.path, env: chosen, updatedAt: new Date().toISOString() })
     return currentProject()
+  }
+
+  // ------------------------------------------------------------- checkpoints
+  // A checkpoint is a copy of one firmware project laid out as
+  // `<stateDir>/checkpoints/<id>/files`, with the build output and VCS data
+  // left out: source only, small enough to keep a dozen of them around.
+  //
+  // Restore means "put the tree back exactly as it was": snapshot files are
+  // copied over the project and every file the snapshot does not know about is
+  // removed (again, with the same exclusions). A restore takes its own
+  // checkpoint first, so an accidental restore is itself undoable.
+
+  const CHECKPOINT_SKIP = new Set(['.pio', '.git', '.venv', 'node_modules', '.board-lab', 'build', '.platformio'])
+
+  function checkpointsRoot() {
+    return join(stateRoot, 'checkpoints')
+  }
+
+  function checkpointStamp(date = new Date()) {
+    const pad = (value) => String(value).padStart(2, '0')
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  }
+
+  /** Copy one directory tree, skipping build output; returns what it copied. */
+  function copyTree(source, target) {
+    let files = 0
+    let bytes = 0
+    const walk = (from, to) => {
+      mkdirSync(to, { recursive: true })
+      for (const entry of readdirSync(from, { withFileTypes: true })) {
+        if (CHECKPOINT_SKIP.has(entry.name)) continue
+        const src = join(from, entry.name)
+        const dst = join(to, entry.name)
+        if (entry.isDirectory()) walk(src, dst)
+        else if (entry.isFile()) {
+          bytes += statSync(src).size
+          copyFileSync(src, dst)
+          files += 1
+        }
+      }
+    }
+    walk(source, target)
+    return { files, bytes }
+  }
+
+  /** Relative paths of every copied file, so restore knows what should exist. */
+  function treeFiles(root, prefix = '', into = new Set()) {
+    if (!existsSync(root)) return into
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) treeFiles(join(root, entry.name), rel, into)
+      else if (entry.isFile()) into.add(rel)
+    }
+    return into
+  }
+
+  /** Delete everything under `dir` that the checkpoint did not contain. */
+  function dropExtraneous(dir, prefix, keep) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (prefix === '' && CHECKPOINT_SKIP.has(entry.name)) continue
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (treeFiles(full, rel).size === 0 && !keep.has(rel)) {
+          rmSync(full, { recursive: true, force: true })
+          continue
+        }
+        dropExtraneous(full, rel, keep)
+      } else if (entry.isFile() && !keep.has(rel)) {
+        unlinkSync(full)
+      }
+    }
+  }
+
+  function readCheckpoint(id) {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) {
+      throw new Error(`"${String(id)}" is not a checkpoint id.`)
+    }
+    const file = join(checkpointsRoot(), id, 'meta.json')
+    if (!existsSync(file)) throw new Error(`Checkpoint ${id} is gone.`)
+    return JSON.parse(readFileSync(file, 'utf8'))
+  }
+
+  function checkpointList() {
+    const root = checkpointsRoot()
+    if (!existsSync(root)) return []
+    const items = []
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      try {
+        items.push(readCheckpoint(entry.name))
+      } catch {
+        // A half-written folder is not a checkpoint; ignore it.
+      }
+    }
+    const current = currentProject()?.path
+    return items
+      .sort((left, right) => String(right.createdAt ?? '').localeCompare(String(left.createdAt ?? '')))
+      .map((item) => ({ ...item, state: current === undefined ? undefined : checkpointState(item, current) }))
+  }
+
+  /**
+   * What the project looks like right now, file by file. Used to say whether a
+   * checkpoint still *is* the current state — the question the panel has to
+   * answer before anyone presses restore.
+   */
+  function treeDigests(root, prefix = '', into = new Map()) {
+    let entries
+    try {
+      entries = readdirSync(root, { withFileTypes: true })
+    } catch {
+      return into
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || CHECKPOINT_SKIP.has(entry.name)) continue
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) {
+        treeDigests(join(root, entry.name), rel, into)
+      } else if (entry.isFile()) {
+        try {
+          into.set(rel, createHash('sha1').update(readFileSync(join(root, entry.name))).digest('hex'))
+        } catch {
+          // An unreadable file is not a reason to fail the panel.
+        }
+      }
+    }
+    return into
+  }
+
+  const digestCache = new Map()
+
+  /** Cheap "(count, bytes, newest mtime)" stamp: only re-hash when the tree moved. */
+  function treeStamp(root) {
+    let count = 0
+    let bytes = 0
+    let newest = 0
+    const walk = (dir) => {
+      let entries
+      try {
+        entries = readdirSync(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.') || CHECKPOINT_SKIP.has(entry.name)) continue
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) {
+          walk(full)
+          continue
+        }
+        try {
+          const info = statSync(full)
+          count += 1
+          bytes += info.size
+          newest = Math.max(newest, info.mtimeMs)
+        } catch {
+          // Vanished mid-walk: ignore.
+        }
+      }
+    }
+    walk(root)
+    return `${count}:${bytes}:${Math.round(newest)}`
+  }
+
+  function digestFor(dir) {
+    const stamp = treeStamp(dir)
+    const cached = digestCache.get(dir)
+    if (cached !== undefined && cached.stamp === stamp) return cached.digests
+    const digests = treeDigests(dir)
+    digestCache.set(dir, { stamp, digests })
+    return digests
+  }
+
+  /** Compare a checkpoint with the working tree: same, or what drifted. */
+  function checkpointState(meta, currentPath) {
+    if (meta.project !== currentPath) return { other: true }
+    if (!existsSync(meta.dir)) return { missing: true }
+    const snapshot = join(checkpointsRoot(), meta.id, 'files')
+    if (!existsSync(snapshot)) return { missing: true }
+    const before = digestFor(snapshot)
+    const after = digestFor(meta.dir)
+    let changed = 0
+    let added = 0
+    let removed = 0
+    for (const [rel, digest] of after) {
+      if (!before.has(rel)) added += 1
+      else if (before.get(rel) !== digest) changed += 1
+    }
+    for (const rel of before.keys()) if (!after.has(rel)) removed += 1
+    return { same: changed === 0 && added === 0 && removed === 0, changed, added, removed }
+  }
+
+  function checkpointCreate({ project, label, guard } = {}) {
+    const pinned = currentProject()
+    const path = typeof project === 'string' && project.trim() !== '' ? project.trim() : pinned?.path
+    if (path === undefined) throw new Error('No current project: select one first (board_project action "select").')
+    const summary = projectSummary(path)
+    if (!existsSync(summary.dir)) throw new Error(`Project directory is missing: ${summary.dir}`)
+    const createdAt = new Date()
+    const id = `${checkpointStamp(createdAt)}-${Math.random().toString(36).slice(2, 6)}`
+    const dir = join(checkpointsRoot(), id)
+    const copied = copyTree(summary.dir, join(dir, 'files'))
+    const meta = {
+      id,
+      project: summary.path,
+      name: summary.name,
+      dir: summary.dir,
+      env: pinned?.project === summary.path ? pinned.env : undefined,
+      label: typeof label === 'string' && label.trim() !== '' ? label.trim().slice(0, 80) : undefined,
+      guard: guard === true ? true : undefined,
+      files: copied.files,
+      bytes: copied.bytes,
+      createdAt: createdAt.toISOString(),
+    }
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`)
+    return meta
+  }
+
+  function checkpointRestore({ id } = {}) {
+    const meta = readCheckpoint(id)
+    if (!existsSync(meta.dir)) throw new Error(`Project directory is missing: ${meta.dir}`)
+    const filesRoot = join(checkpointsRoot(), meta.id, 'files')
+    if (!existsSync(filesRoot)) throw new Error(`Checkpoint ${meta.id} has no files: the snapshot is damaged.`)
+    // Snapshot the "before" state first: the restore stays undoable.
+    const guard = checkpointCreate({ project: meta.project, guard: true })
+    const keep = treeFiles(filesRoot)
+    dropExtraneous(meta.dir, '', keep)
+    const copied = copyTree(filesRoot, meta.dir)
+    return { ...meta, files: copied.files, restoredAt: new Date().toISOString(), guard: guard.id }
+  }
+
+  function checkpointDelete({ id } = {}) {
+    const meta = readCheckpoint(id)
+    rmSync(join(checkpointsRoot(), meta.id), { recursive: true, force: true })
+    return meta
+  }
+
+  // ---------------------------------------------------------------- board maps
+  // Pin tables live in the bundle (maps/*.json), one file per board, so a
+  // board's layout travels with the plugin and stays editable in the repo.
+  // Where the pins are wired is per machine and lives in .board-lab/wiring.json.
+  function mapsDir() {
+    return join(BUNDLE_DIR, 'maps')
+  }
+
+  /**
+   * Pin tables shipped with the plugin, plus the ones composed on this machine.
+   * A locally composed map with the same id wins: it is the newer truth.
+   */
+  function boardMaps() {
+    const maps = []
+    const seen = new Set()
+    const addFrom = (dir) => {
+      if (!existsSync(dir)) return
+      for (const name of readdirSync(dir)) {
+        if (!name.endsWith('.json') || seen.has(name)) continue
+        try {
+          const map = JSON.parse(readFileSync(join(dir, name), 'utf8'))
+          if (map !== null && typeof map === 'object' && typeof map.id === 'string') {
+            maps.push(map)
+            seen.add(name)
+          }
+        } catch {
+          // A broken pin table must not take the panel down.
+        }
+      }
+    }
+    addFrom(join(stateRoot, 'maps'))
+    addFrom(mapsDir())
+    return maps.sort((left, right) => String(left.name ?? left.id).localeCompare(String(right.name ?? right.id)))
+  }
+
+  /** Write into the bundle (the repo) when it is writable, else next to the state. */
+  function writeMapFile(slug, map) {
+    const data = `${JSON.stringify(map, null, 2)}\n`
+    const local = join(stateRoot, 'maps')
+    for (const dir of [mapsDir(), local]) {
+      try {
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(join(dir, `${slug}.json`), data)
+        // Only one copy may exist, or an older one would shadow the new one.
+        const other = dir === local ? join(mapsDir(), `${slug}.json`) : join(local, `${slug}.json`)
+        if (existsSync(other)) rmSync(other, { force: true })
+        return join(dir, `${slug}.json`)
+      } catch {
+        // A read-only bundle is normal for an installed package: fall through.
+      }
+    }
+    throw new Error('Cannot write the board map: neither maps/ nor .board-lab/maps is writable.')
+  }
+
+  /**
+   * A map for a board nobody drew yet: the four shipped tables are not a closed
+   * list, and the panel needs a way to add its own.
+   */
+  function createBlankMap({ id, name, board } = {}) {
+    const wanted = String(id ?? '').trim().toLowerCase()
+    if (!/^[a-z0-9][a-z0-9._-]{0,48}$/.test(wanted)) {
+      throw new Error('A board map id is lowercase letters, digits, dot, dash or underscore, e.g. "nano-v3".')
+    }
+    if (findMap(wanted) !== undefined) throw new Error(`Board map "${wanted}" already exists.`)
+    const alias = String(board ?? wanted).trim() || wanted
+    const label = String(name ?? '').trim() || wanted
+    const map = {
+      id: wanted,
+      name: label.slice(0, 60),
+      board: [alias],
+      verified: false,
+      sides: {},
+      pads: [],
+      note: 'Пустая таблица: ножки добавит агент или форма в панели.',
+    }
+    writeMapFile(wanted, map)
+    return map
+  }
+
+  function findMap(id) {
+    if (typeof id !== 'string' || id === '') return undefined
+    return boardMaps().find((map) => map.id === id)
+  }
+
+  /** Guess the board map from a PlatformIO board id, e.g. "esp32-s3-devkitc-1". */
+  function matchMap(board) {
+    const wanted = typeof board === 'string' ? board.toLowerCase() : ''
+    if (wanted === '') return undefined
+    const maps = boardMaps()
+    for (const map of maps) {
+      if (map.id.toLowerCase() === wanted) return map
+    }
+    for (const map of maps) {
+      for (const alias of Array.isArray(map.board) ? map.board : []) {
+        if (typeof alias === 'string' && wanted.includes(alias.toLowerCase())) return map
+      }
+    }
+    return undefined
+  }
+
+  function wiringFile() {
+    return join(stateRoot, 'wiring.json')
+  }
+
+  function readWiringFile() {
+    const file = wiringFile()
+    if (!existsSync(file)) return {}
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8'))
+      return parsed !== null && typeof parsed === 'object' ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  function writeWiringFile(all) {
+    mkdirSync(stateRoot, { recursive: true })
+    const tmp = `${wiringFile()}.${process.pid}.tmp`
+    writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`)
+    renameSync(tmp, wiringFile())
+  }
+
+  /**
+   * A pasted datasheet table → pin rows. Every vendor lays the columns out
+   * differently, but they all start with a physical pin number in one column,
+   * then the pin name, then the functions. So: find the column that is mostly
+   * numbers, take the cell after it as the name, and keep the cells after that
+   * as functions — minus the type/level columns (I/O, FT, S, "3.6V"), which are
+   * never functions. Bare names, one per line, still work.
+   */
+  const NOT_A_FUNCTION = new Set(['I/O', 'I', 'O', 'S', 'FT', 'FTa', 'TC', 'FTF', '-', ''])
+  function parsePinRows(text) {
+    const lines = String(text ?? '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '')
+    const table = lines.map((line) => line.split(/\t|\s{2,}/).map((cell) => cell.trim()))
+    const numeric = (cell) => /^\d{1,3}$/.test(cell ?? '') && Number(cell) >= 1 && Number(cell) <= 256
+    let numberColumn = -1
+    let best = 0
+    for (let column = 0; column < 4; column += 1) {
+      const hits = table.filter((cells) => numeric(cells[column])).length
+      if (hits > best) {
+        best = hits
+        numberColumn = column
+      }
+    }
+    const rows = []
+    if (best >= Math.max(2, Math.ceil(table.length * 0.4))) {
+      for (const cells of table) {
+        if (!numeric(cells[numberColumn])) continue
+        const name = String(cells[numberColumn + 1] ?? '').split(/[ ,/]/)[0]
+        if (!/^[A-Za-z0-9_+./-]{1,18}$/.test(name)) continue
+        const func = []
+        for (const cell of cells.slice(numberColumn + 2)) {
+          // Prose sits in its own wide cell ("Battery supply for RTC") and is
+          // never a function list; a list is comma/space separated capitals.
+          if (/\s/.test(cell) && !/[,;]/.test(cell)) continue
+          for (const token of cell.split(/[,;]+|\s+/)) {
+            if (token === '' || NOT_A_FUNCTION.has(token) || /^\d+(\.\d+)?V?$/.test(token)) continue
+            if (!/^[A-Z][A-Z0-9_+./-]{0,19}$/.test(token)) continue
+            if (token !== name && !func.includes(token)) func.push(token)
+          }
+        }
+        rows.push({ number: Number(cells[numberColumn]), name, func })
+      }
+    }
+    if (rows.length === 0) {
+      // No table: a plain list of names, one per line, is still a pin table.
+      for (const line of lines) {
+        const name = line.split(/[\s,;]+/)[0]
+        if (!/^[A-Za-z0-9_+./-]{1,18}$/.test(name)) continue
+        rows.push({ number: rows.length + 1, name, func: [] })
+      }
+      return rows
+    }
+    rows.sort((left, right) => left.number - right.number)
+    const seen = new Set()
+    const unique = rows.filter((row) => {
+      if (seen.has(row.number)) return false
+      seen.add(row.number)
+      return true
+    })
+    const broken = unique.findIndex((row) => row.number !== unique.indexOf(row) + 1)
+    if (unique.length > 0 && broken !== -1) {
+      throw new Error(`the table jumps: pin ${unique[broken].number} is in row ${broken + 1}, so a pin is missing before it — paste one package column, not two.`)
+    }
+    return unique
+  }
+
+  /** Alternative functions of one pin: trimmed, deduped, short enough for a label. */
+  function funcList(value) {
+    if (!Array.isArray(value)) return undefined
+    const out = []
+    for (const item of value) {
+      const text = String(item ?? '').trim().replace(/\s+/g, '_').slice(0, 28)
+      if (text === '' || out.includes(text)) continue
+      out.push(text)
+      if (out.length >= 12) break
+    }
+    return out.length === 0 ? undefined : out
+  }
+
+  /**
+   * Pins of a map in physical order. A chip map carries `pins` (index 0 is pin
+   * 1) and is keyed by the pin number; a board map carries `sides` and is keyed
+   * by the pin name. `name` is what the pin is called, `key` is what wiring.json
+   * stores.
+   */
+  function pinEntries(map) {
+    if (map === undefined) return []
+    if (Array.isArray(map.pins) && map.pins.length > 0) {
+      return map.pins.map((entry, index) => {
+        const name = typeof entry === 'string' ? entry : String(entry?.name ?? '')
+        const func = Array.isArray(entry?.func) ? entry.func.map(String) : undefined
+        return func === undefined
+          ? { key: String(index + 1), name, number: index + 1 }
+          : { key: String(index + 1), name, number: index + 1, func }
+      })
+    }
+    const sides = map.sides !== null && typeof map.sides === 'object' ? map.sides : {}
+    const out = []
+    for (const side of ['top', 'bottom', 'left', 'right']) {
+      for (const entry of Array.isArray(sides[side]) ? sides[side] : []) {
+        const name = typeof entry === 'string' ? entry : entry?.pin
+        if (typeof name === 'string' && !out.some((pin) => pin.key === name)) out.push({ key: name, name })
+      }
+    }
+    return out
+  }
+
+  function pinList(map) {
+    return pinEntries(map).map((pin) => pin.key)
+  }
+
+  /** The key wiring.json uses for a pin the user or an agent named. */
+  function pinKeyOf(map, wanted) {
+    const entries = pinEntries(map)
+    const direct = entries.find((pin) => pin.key === wanted)
+    if (direct !== undefined) return direct.key
+    const named = entries.filter((pin) => pin.name.toLowerCase() === String(wanted).toLowerCase())
+    if (named.length === 1) return named[0].key
+    if (named.length > 1) {
+      throw new Error(`"${wanted}" sits on ${named.length} pins of ${map.name} (${named.map((pin) => pin.key).join(', ')}): pass the pin number instead.`)
+    }
+    return undefined
+  }
+
+  /** Wired pins in layout order, with the human name next to the key. */
+  function pinReport(map, source) {
+    const order = new Map(pinEntries(map).map((pin, index) => [pin.key, { index, name: pin.name, func: pin.func }]))
+    const rank = (pin) => order.get(pin)?.index ?? 1e6
+    return Object.entries(source !== null && typeof source === 'object' ? source : {})
+      .map(([pin, entry]) => {
+        const meta = order.get(pin)
+        const out = {
+          pin,
+          name: meta?.name ?? pin,
+          label: typeof entry?.label === 'string' ? entry.label : String(entry),
+          source: entry?.source,
+        }
+        if (meta?.func !== undefined) out.func = meta.func
+        return out
+      })
+      .sort((left, right) => rank(left.pin) - rank(right.pin))
+  }
+
+  /** The board a project targets, as PlatformIO spells it (env.board). */
+  function projectBoard(summary) {
+    if (summary === undefined || !Array.isArray(summary.envs) || summary.envs.length === 0) return undefined
+    return summary.envs.find((env) => env.default === true)?.board ?? summary.envs[0]?.board
+  }
+
+  function wiringGet({ project } = {}) {
+    const pinned = currentProject()
+    const path = typeof project === 'string' && project.trim() !== '' ? project.trim() : pinned?.path
+    const summary = path === undefined ? undefined : projectSummary(path)
+    const all = readWiringFile()
+    const saved = summary === undefined ? undefined : all[summary.path]
+    const map = findMap(saved?.board) ?? matchMap(projectBoard(summary))
+    const known = pinList(map)
+    const pins = {}
+    for (const [pin, entry] of Object.entries(saved?.pins !== null && typeof saved?.pins === 'object' ? saved.pins : {})) {
+      // A pin that the chosen map does not have is kept in the file, not shown.
+      if (known.length === 0) {
+        pins[pin] = entry
+        continue
+      }
+      let key
+      try {
+        key = pinKeyOf(map, pin)
+      } catch {
+        key = undefined
+      }
+      if (key !== undefined) pins[key] = entry
+    }
+    return {
+      project: summary?.path,
+      board: map?.id,
+      map,
+      maps: boardMaps().map((item) => ({ id: item.id, name: item.name, verified: item.verified !== false })),
+      pins,
+    }
+  }
+
+  function wiringSet({ project, board, pin, label } = {}) {
+    if (typeof board !== 'string' || board === '') throw new Error('wiring needs the "board" map id.')
+    if (typeof pin !== 'string' || pin === '') throw new Error('wiring needs the "pin" name.')
+    const map = findMap(board)
+    if (map === undefined) throw new Error(`Unknown board map "${board}": run board_maps to see them.`)
+    const key = pinKeyOf(map, pin)
+    if (key === undefined) throw new Error(`${map.name} has no pin "${pin}".`)
+    const pinned = currentProject()
+    const path = typeof project === 'string' && project.trim() !== '' ? project.trim() : pinned?.path
+    if (path === undefined) throw new Error('No current project: select one first (board_project action "select").')
+    const summary = projectSummary(path)
+    const all = readWiringFile()
+    const entry = all[summary.path] ?? { board: map.id, pins: {} }
+    entry.board = map.id
+    entry.pins = entry.pins !== null && typeof entry.pins === 'object' ? entry.pins : {}
+    const text = typeof label === 'string' ? label.trim().slice(0, 60) : ''
+    if (text === '') delete entry.pins[key]
+    else entry.pins[key] = { label: text, source: 'manual', at: new Date().toISOString() }
+    all[summary.path] = entry
+    writeWiringFile(all)
+    return wiringGet({ project: summary.path })
+  }
+
+  // ------------------------------------------------------------------ commands
+  // The quick buttons send text to the board, and a sensor sketch and a motor
+  // sketch talk differently: the set belongs to the project, not to the plugin.
+  const DEFAULT_COMMANDS = ['PING', 'HELLO', 'VERSION', 'MODE 1', 'MODE 2']
+
+  function commandsFile() {
+    return join(stateRoot, 'commands.json')
+  }
+
+  function readCommandsAll() {
+    const file = commandsFile()
+    if (!existsSync(file)) return {}
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8'))
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  function commandsProject(project) {
+    return typeof project === 'string' && project.trim() !== '' ? project.trim() : currentProject()?.path
+  }
+
+  function commandsGet({ project } = {}) {
+    const path = commandsProject(project)
+    const saved = path === undefined ? undefined : readCommandsAll()[path]
+    if (!Array.isArray(saved) || saved.length === 0) {
+      return { project: path, commands: DEFAULT_COMMANDS.slice(), defaults: true }
+    }
+    return { project: path, commands: saved, defaults: false }
+  }
+
+  function commandsSet({ project, commands } = {}) {
+    const path = commandsProject(project)
+    if (path === undefined) throw new Error('No current project: select one first (board_project action "select").')
+    if (!Array.isArray(commands)) throw new Error('`commands` must be an array of strings.')
+    const clean = []
+    for (const item of commands) {
+      if (typeof item !== 'string') throw new Error('`commands` must be an array of strings.')
+      const text = item.replace(/[\r\n]+/g, ' ').trim().slice(0, 32)
+      if (text === '' || clean.includes(text)) continue
+      clean.push(text)
+      if (clean.length >= 12) break
+    }
+    const all = readCommandsAll()
+    all[path] = clean
+    mkdirSync(stateRoot, { recursive: true })
+    const tmp = `${commandsFile()}.${process.pid}.tmp`
+    writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`)
+    renameSync(tmp, commandsFile())
+    return { project: path, commands: clean, defaults: false }
+  }
+
+  function wiringBoard({ project, board } = {}) {
+    const map = findMap(board)
+    if (map === undefined) throw new Error(`Unknown board map "${String(board)}": run board_maps to see them.`)
+    const pinned = currentProject()
+    const path = typeof project === 'string' && project.trim() !== '' ? project.trim() : pinned?.path
+    if (path === undefined) throw new Error('No current project: select one first (board_project action "select").')
+    const summary = projectSummary(path)
+    const all = readWiringFile()
+    const entry = all[summary.path] ?? { board: map.id, pins: {} }
+    entry.board = map.id
+    all[summary.path] = entry
+    writeWiringFile(all)
+    return wiringGet({ project: summary.path })
+  }
+
+  /**
+   * Compose a board map in place — a chip from a datasheet pin table, a board
+   * from its two headers, or a sketch. Written into maps/<id>.json, so the layout
+   * lands in the repository and the next clone already has it.
+   */
+  function saveMap({ id, name, aliases, sides, note, verified, pads, draw, package: pkg, pins, funcs } = {}) {
+    const slug = String(id ?? '').trim().toLowerCase()
+    if (!/^[a-z0-9][a-z0-9._-]{0,48}$/.test(slug)) {
+      throw new Error('A board map id is lowercase letters, digits, dot, dash or underscore, e.g. "nano-v3".')
+    }
+    // A chip: pin names in physical order, index 0 is pin 1. No coordinates —
+    // the package kind says how the outline is cut into sides. `funcs` adds what
+    // a pin can do (USART1_TX, TIM1_CH2) by pin number; a hand-written JSON may
+    // also carry {name, func} objects instead of bare names.
+    const chipPins = []
+    for (const entry of Array.isArray(pins) ? pins : []) {
+      const pin = typeof entry === 'string' ? entry.trim() : String(entry?.name ?? '').trim()
+      if (pin === '') continue
+      if (!/^[A-Za-z0-9_+./-]{1,18}$/.test(pin)) {
+        throw new Error(`"${pin}" is not a pin name: letters, digits, _ + . / - up to 18 characters.`)
+      }
+      const funcs = funcList(entry?.func)
+      chipPins.push(funcs === undefined ? pin : { name: pin, func: funcs })
+    }
+    for (const [number, list] of Object.entries(funcs !== null && typeof funcs === 'object' ? funcs : {})) {
+      const index = Number(number) - 1
+      if (!Number.isInteger(index) || index < 0 || index >= chipPins.length) {
+        throw new Error(`funcs has "${number}" but the chip has ${chipPins.length} pins (1…${chipPins.length}).`)
+      }
+      const cleaned = funcList(list)
+      if (cleaned === undefined) continue
+      const name = typeof chipPins[index] === 'string' ? chipPins[index] : chipPins[index].name
+      chipPins[index] = { name, func: cleaned }
+    }
+    const QUAD = ['qfp', 'qfn']
+    const DUAL = ['dip', 'soic', 'tssop']
+    const kind = String(pkg?.kind ?? '').trim().toLowerCase()
+    if (chipPins.length > 0) {
+      if (![...QUAD, ...DUAL].includes(kind)) {
+        throw new Error('A chip map needs package.kind: qfp, qfn, dip, soic or tssop.')
+      }
+      const sidesCount = QUAD.includes(kind) ? 4 : 2
+      if (chipPins.length < sidesCount * 2 || chipPins.length % sidesCount !== 0) {
+        throw new Error(`${kind.toUpperCase()} with ${chipPins.length} pins is not a real package: the count must be a multiple of ${sidesCount} and at least ${sidesCount * 2}.`)
+      }
+    }
+    const clean = {}
+    for (const side of ['top', 'bottom', 'left', 'right']) {
+      const list = Array.isArray(sides?.[side]) ? sides[side] : []
+      const pins = []
+      for (const entry of list) {
+        const pin = String(entry ?? '').trim()
+        if (pin === '') continue
+        if (!/^[A-Za-z0-9_+./-]{1,18}$/.test(pin)) {
+          throw new Error(`"${pin}" is not a pin name: letters, digits, _ + . / - up to 18 characters.`)
+        }
+        // Positional repeats are legitimate pins: two 3V3 and three GND on the
+        // ESP32-S3-DevKitC-1 headers. Dropping them shifts every later pad.
+        pins.push(pin)
+      }
+      if (pins.length > 0) clean[side] = pins
+    }
+    const total = Object.values(clean).reduce((sum, list) => sum + list.length, 0)
+    if (chipPins.length === 0 && total < 2) {
+      throw new Error('A board map needs pins: pass at least two names in sides.left/right/top/bottom, or `pins` with a `package` for a chip.')
+    }
+    const listFrom = (value) => {
+      if (Array.isArray(value)) return value.map((item) => String(item).trim().toLowerCase()).filter((item) => item !== '')
+      if (typeof value === 'string') return value.split(',').map((item) => item.trim().toLowerCase()).filter((item) => item !== '')
+      return []
+    }
+    const map = {
+      id: slug,
+      name: typeof name === 'string' && name.trim() !== '' ? name.trim().slice(0, 60) : slug,
+      board: listFrom(aliases).length === 0 ? [slug] : listFrom(aliases),
+      verified: verified !== false,
+    }
+    if (chipPins.length > 0) {
+      map.package = { kind }
+      map.pins = chipPins
+    }
+    if (total > 0) map.sides = clean
+    const trimmed = typeof note === 'string' ? note.trim().slice(0, 240) : ''
+    if (trimmed !== '') map.note = trimmed
+    const known = chipPins.length > 0
+      ? new Set(chipPins.map((_, index) => String(index + 1)))
+      : new Set(Object.values(clean).flat())
+    const placed = []
+    for (const entry of Array.isArray(pads) ? pads : []) {
+      const pin = String(entry?.pin ?? '').trim()
+      const x = Number(entry?.x)
+      const y = Number(entry?.y)
+      if (pin === '' || !known.has(pin)) throw new Error(`Pad "${pin}" is not a pin of this map: place only pins from sides.`)
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+        throw new Error(`Pad "${pin}" needs x and y between 0 and 1 (a share of the drawing).`)
+      }
+      placed.push({ pin, x: Math.round(x * 10000) / 10000, y: Math.round(y * 10000) / 10000 })
+    }
+    if (placed.length > 0) map.pads = placed
+    const shapes = []
+    const share = (value) => Math.round(Number(value) * 10000) / 10000
+    for (const entry of Array.isArray(draw) ? draw : []) {
+      const type = String(entry?.type ?? '').trim()
+      const x = Number(entry?.x)
+      const y = Number(entry?.y)
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+        throw new Error('Every draw shape needs x and y as shares of the drawing, 0 (top/left) to 1 (bottom/right).')
+      }
+      if (type === 'rect') {
+        const w = Number(entry?.w)
+        const hgt = Number(entry?.h)
+        if (!Number.isFinite(w) || !Number.isFinite(hgt) || w <= 0 || hgt <= 0 || x + w > 1.002 || y + hgt > 1.002) {
+          throw new Error('A draw rect needs w and h greater than 0, and x+w, y+h must stay inside 1.')
+        }
+        const shape = { type: 'rect', x: share(x), y: share(y), w: share(w), h: share(hgt) }
+        if (['board', 'chip', 'metal', 'accent', 'hole'].includes(String(entry?.fill ?? ''))) shape.fill = String(entry.fill)
+        const label = typeof entry?.label === 'string' ? entry.label.trim().slice(0, 40) : ''
+        if (label !== '') shape.label = label
+        shapes.push(shape)
+        continue
+      }
+      if (type === 'text') {
+        const content = typeof entry?.text === 'string' ? entry.text.trim().slice(0, 40) : ''
+        if (content === '') throw new Error('A draw text shape needs "text".')
+        const shape = { type: 'text', x: share(x), y: share(y), text: content }
+        const size = Number(entry?.size)
+        if (Number.isFinite(size) && size >= 4 && size <= 40) shape.size = Math.round(size)
+        if (['board', 'chip', 'metal', 'accent', 'hole'].includes(String(entry?.fill ?? ''))) shape.fill = String(entry.fill)
+        shapes.push(shape)
+        continue
+      }
+      throw new Error(`Unknown draw shape "${type}": use "rect" or "text".`)
+    }
+    if (shapes.length > 0) map.draw = shapes.slice(0, 400)
+    writeMapFile(slug, map)
+    return map
+  }
+
+  /** `#define DIO 4` and friends: turn numeric constants into pin suggestions. */
+  function wiringDraft({ project, board } = {}) {
+    const pinned = currentProject()
+    const path = typeof project === 'string' && project.trim() !== '' ? project.trim() : pinned?.path
+    if (path === undefined) throw new Error('No current project: select one first (board_project action "select").')
+    const summary = projectSummary(path)
+    const map = findMap(board) ?? findMap(readWiringFile()[summary.path]?.board) ?? matchMap(projectBoard(summary))
+    const byNumber = new Map()
+    const byPort = new Map()
+    for (const pin of pinEntries(map)) {
+      const port = /^P([A-K])(\d{1,2})$/.exec(pin.name)
+      if (port !== null) {
+        byPort.set(`${port[1]}${port[2]}`, pin.key)
+        continue
+      }
+      const digits = /(\d+)$/.exec(pin.name)
+      if (digits !== null && !byNumber.has(Number(digits[1]))) byNumber.set(Number(digits[1]), pin.key)
+    }
+    const found = []
+    const seen = new Set()
+    const skippedNames = /^(GND|VCC|VIN|3V3|5V|AREF|RESET|RST|NRST|IOREF|VBAT)$/i
+    const files = []
+    const walk = (dir, depth) => {
+      if (depth > 4 || !existsSync(dir)) return
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || CHECKPOINT_SKIP.has(entry.name)) continue
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) walk(full, depth + 1)
+        else if (/\.(c|cc|cpp|cxx|h|hpp|ino|py)$/i.test(entry.name)) files.push(full)
+      }
+    }
+    walk(summary.dir, 0)
+    const numeric = [
+      /#define\s+([A-Za-z_]\w*)\s+(\d+)\b/g,
+      /(?:const|constexpr)\s+(?:int|uint8_t|uint16_t|byte|unsigned)\s+([A-Za-z_]\w*)\s*=\s*(\d+)\b/g,
+    ]
+    const ported = /#define\s+([A-Za-z_]\w*)\s+(P[A-K]\d{1,2})\b/g
+    const note = (pin, label) => {
+      if (pin === undefined || seen.has(pin) || skippedNames.test(label)) return
+      seen.add(pin)
+      found.push({ pin, label })
+    }
+    for (const file of files) {
+      let text = ''
+      try {
+        text = readFileSync(file, 'utf8')
+      } catch {
+        continue
+      }
+      for (const pattern of numeric) {
+        pattern.lastIndex = 0
+        for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+          note(byNumber.get(Number(match[2])), match[1])
+        }
+      }
+      ported.lastIndex = 0
+      for (let match = ported.exec(text); match !== null; match = ported.exec(text)) {
+        note(byPort.get(match[2].slice(1)), match[1])
+      }
+    }
+    const all = readWiringFile()
+    const entry = all[summary.path] ?? { board: map?.id, pins: {} }
+    if (map !== undefined) entry.board = map.id
+    entry.pins = entry.pins !== null && typeof entry.pins === 'object' ? entry.pins : {}
+    let applied = 0
+    for (const item of found) {
+      if (entry.pins[item.pin] !== undefined) continue
+      entry.pins[item.pin] = { label: item.label, source: 'code', at: new Date().toISOString() }
+      applied += 1
+    }
+    all[summary.path] = entry
+    writeWiringFile(all)
+    return { applied, skipped: found.length - applied, project: summary.path, ...wiringGet({ project: summary.path }) }
   }
 
   /** Open a project folder (or its lib/ or src/) in the desktop file manager. */
@@ -1185,6 +2082,10 @@ export function apply(ctx, config = {}) {
       baud: state?.baud,
       error: state?.open === false ? (state?.error ?? undefined) : undefined,
     }
+  }
+
+  function tailChunk(chunk, lines) {
+    return lastLines(chunk, lines)
   }
 
   /** Move the stored read offset for one port (all consumers by default). */
@@ -2341,9 +3242,289 @@ export function apply(ctx, config = {}) {
       },
     },
     {
+      name: 'board_checkpoint',
+      description:
+        'Snapshots of the current firmware project, source only: build output, `.git` and the toolchain cache are left out. create saves the project as it is now, list shows snapshots newest first, restore puts the tree back exactly as it was in a snapshot (files added since are deleted), delete drops one. Restore takes a "before restore" snapshot first, so a wrong restore is itself undoable. Take a checkpoint before a risky edit; when the device behaves worse, one restore brings the working tree back.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['action'],
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['create', 'list', 'restore', 'delete'],
+            description: 'create — snapshot now; list — snapshots with time, label and size; restore — put the tree back; delete — drop a snapshot.',
+          },
+          project: { ...PROJECT_PARAM, description: 'Project to snapshot (create); defaults to the current project.' },
+          label: { type: 'string', description: 'A short note shown in the panel, for example "touch works".' },
+          id: { type: 'string', description: 'Snapshot id for restore/delete, from create or list.' },
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ok'],
+          properties: {
+            ok: { type: 'boolean' },
+            action: { type: 'string' },
+            checkpoint: CHECKPOINT_SCHEMA,
+            checkpoints: { type: 'array', items: CHECKPOINT_SCHEMA },
+          },
+        },
+        render: (_args, value) => {
+          const line = (item) => {
+            const when = item.createdAt === undefined ? '' : new Date(item.createdAt).toLocaleString()
+            const label = item.label === undefined ? '' : ` · ${item.label}`
+            return `${item.id} · ${when}${label} · ${item.project} · ${item.files} file(s), ${Math.round((item.bytes ?? 0) / 1024)} KB`
+          }
+          if (value.checkpoint !== undefined) {
+            const restored = value.checkpoint.restoredAt === undefined ? '' : `\nrestored over ${value.checkpoint.dir}`
+            const guard = value.checkpoint.guard === undefined ? '' : `\nprevious state kept as ${value.checkpoint.guard}`
+            return [{ type: 'text', text: `${line(value.checkpoint)}${restored}${guard}` }]
+          }
+          const items = value.checkpoints ?? []
+          return [{ type: 'text', text: items.length === 0 ? 'no checkpoints yet' : items.map(line).join('\n') }]
+        },
+      },
+      async execute(args) {
+        const action = String(args.action ?? 'list')
+        if (action === 'list') return compact({ ok: true, action, checkpoints: checkpointList() })
+        if (action === 'create') {
+          return compact({
+            ok: true,
+            action,
+            checkpoint: checkpointCreate({
+              project: typeof args.project === 'string' && args.project.trim() !== '' ? args.project.trim() : undefined,
+              label: typeof args.label === 'string' ? args.label : undefined,
+            }),
+          })
+        }
+        if (action === 'restore' || action === 'delete') {
+          const id = typeof args.id === 'string' && args.id !== '' ? args.id : undefined
+          if (id === undefined) throw new Error(`action "${action}" needs the \`id\` of a checkpoint: run action "list" to see them.`)
+          const checkpoint = action === 'restore' ? checkpointRestore({ id }) : checkpointDelete({ id })
+          return compact({ ok: true, action, checkpoint, checkpoints: checkpointList() })
+        }
+        throw new Error(`Unknown action "${action}"; use create, list, restore or delete.`)
+      },
+    },
+    {
+      name: 'board_maps',
+      description:
+        'The board map: the pins of a board or a chip (from the plugin\'s maps/ folder) and what is wired to them for the current project (`.board-lab/wiring.json`, the same data the panel shows). get answers "which pin is the buzzer on" and "is GPIO4 free"; set records a connection by pin name, or by pin number when one name sits on several pins; draft proposes connections from the project source (`#define DIO 4`, `const int LED = 2`), never overwriting a pin that already has a label; save composes a map in place. A chip is saved as `package` plus `pins`: the datasheet pin table in physical order, index 0 is pin 1, names only — the renderer cuts the outline into sides and numbers the pins counter-clockwise, so there are no coordinates to place. `funcs` adds the alternate functions of a pin by number (USART1_TX, TIM1_CH2); they show up on hover and in the pin table. A board with two pin headers is saved as `sides`, pins in the order they sit on the header. Pin tables are repo files under maps/: change them through save, so the layout ships with the plugin.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['action'],
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'get', 'set', 'draft', 'save'],
+            description: 'list — maps and the current one; get — pins plus wiring; set — record or clear a connection; draft — fill empty pins from the source; save — compose a board map.',
+          },
+          project: { ...PROJECT_PARAM, description: 'Project whose wiring to use; defaults to the current project.' },
+          board: { type: 'string', description: 'Map id from action "list", for example esp32-s3-devkitc-1. Omit to use the board already chosen for the project.' },
+          pin: { type: 'string', description: 'Pin name for set, exactly as the map spells it (GPIO4, D4, PA5).' },
+          label: { type: 'string', description: 'What is wired to the pin, for example "TM1637 DIO". Empty string clears the pin.' },
+          id: { type: 'string', description: 'Map id for save: lowercase letters, digits, dot, dash, e.g. "arduino-nano-v3".' },
+          name: { type: 'string', description: 'Human name for save, e.g. "Arduino Nano v3".' },
+          aliases: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'PlatformIO board ids for save, matched as substrings of env.board, e.g. ["nano", "atmega328p"].',
+          },
+          note: { type: 'string', description: 'One line shown under the map, e.g. "LQFP48, читано по DS5319 table 4".' },
+          verified: { type: 'boolean', description: 'save: true when the pin order was read off the real board (default true).' },
+          package: {
+            type: 'object',
+            additionalProperties: false,
+            description: 'save: the outline of a chip — the renderer derives every pin position from the kind and the pin count.',
+            properties: {
+              kind: { type: 'string', enum: ['qfp', 'qfn', 'dip', 'soic', 'tssop'], description: 'qfp/qfn are four-sided, dip/soic/tssop two-sided.' },
+            },
+          },
+          pins: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'save: a chip\'s pin names in physical order — index 0 is pin 1, so the count is the pin count of the package. Copy the datasheet pin table: names only, no coordinates. The pin number (1…N) is the key wiring stores, so four GND pins stay four different pins.',
+          },
+          funcs: {
+            type: 'object',
+            additionalProperties: { type: 'array', items: { type: 'string' } },
+            description: 'save: what a pin can do, keyed by pin number ("12": ["USART1_TX", "TIM1_CH2"]) — the alternate-function column of the datasheet. Sparse: only pins that have functions need an entry. Shown on hover and in the pin table, so a wrong number is visible at once.',
+          },
+          draw: {
+            type: 'array',
+            description: 'save: a board drawn as plain shapes, for a board nobody has a pin table for — a sketch with chips, connectors and silk text.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['type', 'x', 'y'],
+              properties: {
+                type: { type: 'string', enum: ['rect', 'text'] },
+                x: { type: 'number', description: '0 (left edge) … 1 (right edge).' },
+                y: { type: 'number', description: '0 (top edge) … 1 (bottom edge).' },
+                w: { type: 'number', description: 'rect: width as a share of the drawing.' },
+                h: { type: 'number', description: 'rect: height as a share of the drawing.' },
+                label: { type: 'string', description: 'rect: silkscreen text in the middle, e.g. "ESP32-S3".' },
+                text: { type: 'string', description: 'text: the words to draw.' },
+                size: { type: 'number', description: 'text: font size 4…40 in a 1000-unit drawing.' },
+                fill: { type: 'string', enum: ['board', 'chip', 'metal', 'accent', 'hole'] },
+              },
+            },
+          },
+          pads: {
+            type: 'array',
+            description: 'save: where a pin sits on a hand-drawn board (draw), as shares of the drawing\'s width and height.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['pin', 'x', 'y'],
+              properties: {
+                pin: { type: 'string' },
+                x: { type: 'number', description: '0 (left edge) … 1 (right edge).' },
+                y: { type: 'number', description: '0 (top edge) … 1 (bottom edge).' },
+              },
+            },
+          },
+          sides: {
+            type: 'object',
+            additionalProperties: false,
+            description: 'save: pins per side, in the order they sit on the board.',
+            properties: {
+              top: { type: 'array', items: { type: 'string' } },
+              bottom: { type: 'array', items: { type: 'string' } },
+              left: { type: 'array', items: { type: 'string' } },
+              right: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ok'],
+          properties: {
+            ok: { type: 'boolean' },
+            action: { type: 'string' },
+            project: { type: 'string' },
+            board: { type: 'string' },
+            count: { type: 'integer' },
+            applied: { type: 'integer' },
+            skipped: { type: 'integer' },
+            pins: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['pin'],
+                properties: {
+                  pin: { type: 'string' },
+                  name: { type: 'string' },
+                  label: { type: 'string' },
+                  source: { type: 'string' },
+                  func: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+            maps: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['id', 'name'],
+                properties: {
+                  id: { type: 'string' },
+                  name: { type: 'string' },
+                  verified: { type: 'boolean' },
+                  current: { type: 'boolean' },
+                  pins: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+        render: (_args, value) => {
+          const lines = []
+          if (value.maps !== undefined) {
+            for (const map of value.maps) {
+              const mark = map.current === true ? ' ← current' : ''
+              const verified = map.verified === false ? ' (layout not checked yet)' : ''
+              const stub = map.pins === 0 ? ' · no pins yet' : ''
+              lines.push(`${map.id} · ${map.name}${stub}${verified}${mark}`)
+            }
+          }
+          if (value.board !== undefined && value.pins !== undefined) {
+            lines.push(`board ${value.board} · ${value.pins.length} pin(s) used`)
+            for (const pin of value.pins) lines.push(`  ${pin.pin}${pin.name === undefined ? '' : ` ${pin.name}`} → ${pin.label}${pin.source === 'code' ? ' (from source)' : ''}`)
+          }
+          if (value.applied !== undefined) lines.push(`drafted ${value.applied} connection(s), ${value.skipped ?? 0} already labelled`)
+          return [{ type: 'text', text: lines.length === 0 ? 'no board maps installed' : lines.join('\n') }]
+        },
+      },
+      async execute(args) {
+        const action = String(args.action ?? 'list')
+        const project = typeof args.project === 'string' && args.project.trim() !== '' ? args.project.trim() : undefined
+        const board = typeof args.board === 'string' && args.board.trim() !== '' ? args.board.trim() : undefined
+        if (action === 'list') {
+          const wiring = wiringGet({ project })
+          const maps = boardMaps().map((map) => ({
+            id: map.id, name: map.name, verified: map.verified !== false,
+            current: map.id === wiring.board, pins: pinList(map).length,
+          }))
+          return compact({ ok: true, action, board: wiring.board, project: wiring.project, maps })
+        }
+        if (action === 'get') {
+          const wiring = wiringGet({ project })
+          const map = findMap(board) ?? wiring.map
+          if (map === undefined) throw new Error('No board map matched: pass `board` from action "list".')
+          return compact({
+            ok: true, action, project: wiring.project, board: map.id,
+            pins: pinReport(map, wiring.pins), count: pinList(map).length,
+          })
+        }
+        if (action === 'set') {
+          const wiring = wiringSet({ project, board: board ?? wiringGet({ project }).board, pin: args.pin, label: args.label })
+          const map = findMap(wiring.board)
+          return compact({ ok: true, action, project: wiring.project, board: wiring.board, pins: pinReport(map, wiring.pins) })
+        }
+        if (action === 'draft') {
+          const result = wiringDraft({ project, board })
+          const map = findMap(result.board)
+          return compact({ ok: true, action, project: result.project, board: result.board, applied: result.applied, skipped: result.skipped, pins: pinReport(map, result.pins) })
+        }
+        if (action === 'save') {
+          const map = saveMap({
+            id: args.id,
+            name: args.name,
+            aliases: args.aliases,
+            sides: args.sides,
+            note: args.note,
+            verified: args.verified,
+            package: args.package,
+            pins: args.pins,
+            funcs: args.funcs,
+            pads: args.pads,
+            draw: args.draw,
+          })
+          let wiring
+          try {
+            wiring = wiringBoard({ project, board: map.id })
+          } catch {
+            wiring = wiringGet({ project })
+          }
+          const maps = boardMaps().map((item) => ({ id: item.id, name: item.name, verified: item.verified !== false, current: item.id === wiring.board }))
+          return compact({ ok: true, action, project: wiring.project, board: wiring.board, maps })
+        }
+        throw new Error(`Unknown action "${action}"; use list, get, set, draft or save.`)
+      },
+    },
+    {
       name: 'board_monitor',
       description:
-        'Persistent UART monitor. action=start keeps the port open in a detached process and captures everything the device prints; action=read returns only new output since the previous read (peek does not advance, fromStart reads the whole log); action=stop closes it; action=status lists monitors. Reading does not reset the board, so boot logs survive between calls.',
+        'Persistent UART monitor. action=start keeps the port open in a detached process and captures everything the device prints; action=read returns only new output since the previous read (peek does not advance, fromStart reads the whole log); action=stop closes it; action=status lists monitors. Reading does not reset the board, so boot logs survive between calls. Pass `lines` to get just the tail of the new output — the usual way to look at a log after a change.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -2356,6 +3537,7 @@ export function apply(ctx, config = {}) {
           fromStart: { type: 'boolean', description: 'read: return the whole log from offset 0.' },
           peek: { type: 'boolean', description: 'read: do not advance the stored offset.' },
           maxBytes: { type: 'integer', description: 'read: cap the returned bytes (default 65536).' },
+          lines: { type: 'integer', description: 'read: keep only the last N lines of the new output (the cursor still advances past everything).' },
           waitMs: { type: 'integer', description: 'read: wait up to this many ms for new output before answering (default 0).' },
         },
       },
@@ -2382,6 +3564,7 @@ export function apply(ctx, config = {}) {
             nextOffset: { type: 'integer' },
             pendingBytes: { type: 'integer' },
             startOffset: { type: 'integer' },
+            droppedLines: { type: 'integer' },
             monitors: {
               type: 'array',
               items: {
@@ -2402,14 +3585,17 @@ export function apply(ctx, config = {}) {
         },
         render: (_args, value) => {
           if (value.action === 'read') {
+            const skipped = Number.isInteger(value.droppedLines) && value.droppedLines > 0
+              ? `\n\n(${value.droppedLines} earlier line${value.droppedLines === 1 ? '' : 's'} skipped — read again with fromStart to see them)`
+              : ''
             if (value.text !== '') {
               // Bytes read from a stopped monitor come from the log file, not
               // from a live device: say so instead of letting them pass for the
               // current output of the board.
               if (value.running === false) {
-                return [{ type: 'text', text: `${value.text}\n\n(monitor is not running — this is buffered output from the log; start it again to capture more)` }]
+                return [{ type: 'text', text: `${value.text}${skipped}\n\n(monitor is not running — this is buffered output from the log; start it again to capture more)` }]
               }
-              return [{ type: 'text', text: value.text }]
+              return [{ type: 'text', text: `${value.text}${skipped}` }]
             }
             if (value.running === false) {
               return [{ type: 'text', text: `(no new output on ${value.port} — the monitor is not running; start it again to capture more)` }]
@@ -2450,6 +3636,9 @@ export function apply(ctx, config = {}) {
           while (waitMs > 0 && chunk.bytes === 0 && Date.now() < deadline) {
             await sleep(150)
             chunk = await readMonitor({ port, fromStart: args.fromStart === true, peek: args.peek === true, maxBytes: args.maxBytes })
+          }
+          if (Number.isInteger(args.lines) && args.lines >= 1) {
+            chunk = lastLines(chunk, args.lines)
           }
           return compact({ ok: true, action: 'read', ...chunk })
         }
@@ -3004,7 +4193,7 @@ export function apply(ctx, config = {}) {
       })
       res.end(data)
     }
-    const handle = (method, path, run) => ({
+    const handle = (method, path, run, limit) => ({
       kind: 'exact',
       path,
       handler: async (req, res) => {
@@ -3018,7 +4207,7 @@ export function apply(ctx, config = {}) {
         }
         let body
         try {
-          body = method === 'GET' ? {} : await readJsonBody(req)
+          body = method === 'GET' ? {} : await readJsonBody(req, limit)
         } catch (error) {
           json(res, 400, { error: error instanceof Error ? error.message : String(error) })
           return
@@ -3039,12 +4228,14 @@ export function apply(ctx, config = {}) {
         ports: attachedPorts(),
         monitors: listMonitors(),
         // Cached ports only: no probing, so opening the panel never resets a board.
+        commands: commandsGet({}).commands,
         remembered: attachedPorts()
           .map((port) => {
             const cached = readBoards()[boardCacheKey(port)]
             return cached === undefined ? undefined : { port: port.path, project: cached.project, env: cached.env }
           })
           .filter(Boolean),
+        checkpoints: checkpointList(),
         toolchain: {
           platformio: workspacePython || platformioPio() !== undefined || platformioPython() !== undefined,
           armGcc: existsSync(join(toolchainDir, 'pio', 'packages', 'toolchain-gccarmnoneeabi', 'bin', 'arm-none-eabi-gcc'))
@@ -3141,6 +4332,75 @@ export function apply(ctx, config = {}) {
         newline: body.newline !== false,
       })),
       handle('POST', '/board-lab/reset', async (body) => resetOp({ port: typeof body.port === 'string' ? body.port : undefined })),
+      handle('GET', '/board-lab/checkpoints', async () => ({ checkpoints: checkpointList() })),
+      handle('POST', '/board-lab/checkpoints/create', async (body) => ({
+        ok: true,
+        checkpoint: checkpointCreate({
+          project: typeof body.project === 'string' && body.project !== '' ? body.project : undefined,
+          label: typeof body.label === 'string' ? body.label : undefined,
+        }),
+        checkpoints: checkpointList(),
+      })),
+      handle('POST', '/board-lab/checkpoints/restore', async (body) => ({
+        ok: true,
+        checkpoint: checkpointRestore({ id: String(body.id ?? '') }),
+        checkpoints: checkpointList(),
+      })),
+      handle('POST', '/board-lab/checkpoints/delete', async (body) => ({
+        ok: true,
+        checkpoint: checkpointDelete({ id: String(body.id ?? '') }),
+        checkpoints: checkpointList(),
+      })),
+      handle('GET', '/board-lab/wiring', async () => wiringGet({})),
+      handle('POST', '/board-lab/wiring/set', async (body) => wiringSet({
+        project: typeof body.project === 'string' && body.project !== '' ? body.project : undefined,
+        board: typeof body.board === 'string' ? body.board : undefined,
+        pin: String(body.pin ?? ''),
+        label: typeof body.label === 'string' ? body.label : '',
+      })),
+      handle('POST', '/board-lab/wiring/board', async (body) => wiringBoard({
+        project: typeof body.project === 'string' && body.project !== '' ? body.project : undefined,
+        board: String(body.board ?? ''),
+      })),
+      handle('POST', '/board-lab/maps/parse', async (body) => {
+        const rows = parsePinRows(body?.text)
+        return {
+          count: rows.length,
+          pins: rows.map((row) => (row.func.length === 0 ? { name: row.name } : { name: row.name, func: row.func })),
+        }
+      }),
+      handle('POST', '/board-lab/maps/save', async (body) => {
+        const map = saveMap({
+          id: body.id,
+          name: body.name,
+          aliases: body.aliases,
+          sides: body.sides,
+          note: body.note,
+          verified: body.verified,
+          package: body.package,
+          pins: body.pins,
+          draw: body.draw,
+          pads: body.pads,
+        })
+        const pinned = currentProject()
+        if (pinned !== undefined) wiringBoard({ project: pinned.path, board: map.id })
+        return { ok: true, map, wiring: wiringGet({ project: pinned?.path }) }
+      }),
+      handle('POST', '/board-lab/maps/new', async (body) => {
+        const map = createBlankMap({ id: body.id, name: body.name, board: body.board })
+        const pinned = currentProject()
+        if (pinned !== undefined) wiringBoard({ project: pinned.path, board: map.id })
+        return { ok: true, map, wiring: wiringGet({ project: pinned?.path }) }
+      }),
+      handle('GET', '/board-lab/commands', async () => ({ ok: true, ...commandsGet({}) })),
+      handle('POST', '/board-lab/commands/set', async (body) => ({
+        ok: true,
+        ...commandsSet({ project: typeof body.project === 'string' && body.project !== '' ? body.project : undefined, commands: body.commands }),
+      })),
+      handle('POST', '/board-lab/wiring/draft', async (body) => wiringDraft({
+        project: typeof body.project === 'string' && body.project !== '' ? body.project : undefined,
+        board: typeof body.board === 'string' && body.board !== '' ? body.board : undefined,
+      })),
       handle('POST', '/board-lab/cycle', async (body) => cycleOp({
         project: body.project,
         env: typeof body.env === 'string' ? body.env : undefined,

@@ -1,0 +1,59 @@
+{
+  "id": "stm32-bluepill",
+  "name": "STM32 BluePill (STM32F103C8T6)",
+  "board": [
+    "bluepill",
+    "blue-pill",
+    "stm32f103c8",
+    "stm32f103c8t6",
+    "blackpill"
+  ],
+  "verified": false,
+  "note": "Порядок ножек сверь с платой (у клонов он гуляет). Правится в maps/stm32-bluepill.json.",
+  "sides": {
+    "left": [
+      "VBAT",
+      "PC13",
+      "PC14",
+      "PC15",
+      "PA0",
+      "PA1",
+      "PA2",
+      "PA3",
+      "PA4",
+      "PA5",
+      "PA6",
+      "PA7",
+      "PB0",
+      "PB1",
+      "PB10",
+      "PB11",
+      "NRST",
+      "3V3",
+      "GND",
+      "GND"
+    ],
+    "right": [
+      "3V3",
+      "GND",
+      "5V",
+      "PB9",
+      "PB8",
+      "PB7",
+      "PB6",
+      "PB5",
+      "PB4",
+      "PB3",
+      "PA15",
+      "PA12",
+      "PA11",
+      "PA10",
+      "PA9",
+      "PA8",
+      "PB15",
+      "PB14",
+      "PB13",
+      "PB12"
+    ]
+  }
+}

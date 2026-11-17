@@ -1,0 +1,48 @@
+{
+  "id": "arduino-uno",
+  "name": "Arduino Uno R3",
+  "board": [
+    "uno",
+    "arduino-uno",
+    "atmega328p"
+  ],
+  "verified": true,
+  "note": "Две гребёнки: сверху питание и аналоговые входы, снизу цифровые D0–D13.",
+  "sides": {
+    "top": [
+      "IOREF",
+      "RESET",
+      "3V3",
+      "5V",
+      "GND",
+      "GND",
+      "VIN",
+      "A0",
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5"
+    ],
+    "bottom": [
+      "D0",
+      "D1",
+      "D2",
+      "D3",
+      "D4",
+      "D5",
+      "D6",
+      "D7",
+      "D8",
+      "D9",
+      "D10",
+      "D11",
+      "D12",
+      "D13",
+      "GND",
+      "AREF",
+      "SDA",
+      "SCL"
+    ]
+  }
+}

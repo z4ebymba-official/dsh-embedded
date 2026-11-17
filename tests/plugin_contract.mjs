@@ -92,10 +92,28 @@ function assertContract(definition, result) {
 
 // ---------------------------------------------------------------- fake harness
 const definitions = new Map()
+// The Host web server keys exact routes by path alone and throws on a duplicate,
+// which aborts the rest of the registration loop: a colliding path silently
+// takes every later route (the panel's wiring map, for one) with it.
+const routeKeys = new Set()
+const routePaths = []
+const duplicateRoutes = []
 const ctx = {
   tools: { register: (definition) => { definitions.set(definition.name, definition); return () => {} } },
+  webServer: {
+    register: (route) => {
+      const key = `${route.kind}:${route.path}`
+      if (routeKeys.has(key)) duplicateRoutes.push(key)
+      routeKeys.add(key)
+      routePaths.push(route.path)
+      return () => {}
+    },
+  },
   effect: (fn) => { fn(); return () => {} },
-  inject: () => {},
+  inject: (first, second) => {
+    const fn = typeof first === 'function' ? first : second
+    if (typeof fn === 'function') fn(ctx)
+  },
 }
 
 apply(ctx, {
@@ -104,6 +122,11 @@ apply(ctx, {
   projectsDir: 'firmware',
   stateDir: STATE_DIR,
 })
+
+if (duplicateRoutes.length > 0) fail(`routes: duplicate exact route(s) ${duplicateRoutes.join(', ')} — the web server throws and loses every later route`)
+for (const path of ['/board-lab/status', '/board-lab/wiring', '/board-lab/maps/parse', '/board-lab/maps/save', '/board-lab/maps/new', '/board-lab/commands', '/board-lab/checkpoints/create']) {
+  if (!routePaths.includes(path)) fail(`routes: ${path} was not registered, the panel cannot reach it`)
+}
 
 const call = async (tool, args) => {
   const definition = definitions.get(tool)
