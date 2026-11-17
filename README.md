@@ -67,7 +67,8 @@ OpenOCD) и Artery AT32F403A/407 (GCC + Makefile, J-Link / ST-Link / CMSIS-DAP /
 
 - DSH (профиль `web` или настольная версия) — плагин ставится как bundle.
 - PlatformIO Core: либо системный (`pio` в PATH или `%USERPROFILE%\.platformio\penv` / `~/.platformio/penv`),
-  либо локальный тулчейн в `<workspace>/.toolchain` (см. `tools/setup-toolchain.sh` в workspace).
+  либо локальный тулчейн в `<workspace>/.toolchain` — его ставит `board_tools` с `action: "install"`
+  (или кнопка «Скачать выбранные» в настройках). Bash-скриптов и sudo не нужно.
 - Python из PlatformIO уже содержит pyserial и esptool; отдельно ставить ничего не нужно.
 - AVR/Arduino: avrdude приходит с PlatformIO (`platform = atmelavr`); USB-UART драйвер (CH340/FTDI) — из системы.
 - STM32: `platform = ststm32`; прошивка через ST-Link (`st-info`/`STM32CubeProgrammer`), DFU или J-Link.

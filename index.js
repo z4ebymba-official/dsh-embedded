@@ -11,7 +11,7 @@
  * log of the new firmware is captured without unplugging the board.
  *
  * Everything runs through the workspace-local toolchain under `<toolchainDir>`
- * (see tools/setup-toolchain.sh): no root, no writes to $HOME.
+ * (see the `board_tools` install action): no root, no writes to $HOME.
  */
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -340,7 +340,7 @@ export function apply(ctx, config = {}) {
       if (!workspacePython && platformioPython() === undefined) {
         throw new Error(
           `PlatformIO was not found: no ${join(toolchainDir, 'pylib')} and no PlatformIO virtualenv. `
-          + 'Install PlatformIO (https://platformio.org/install) or run tools/setup-toolchain.sh once, '
+          + 'Install it with `board_tools` action `install` id `platformio`, or from platformio.org/install, '
           + 'then set the plugin config `python`/`toolchainDir` if they live elsewhere.',
         )
       }
@@ -1634,7 +1634,7 @@ export function apply(ctx, config = {}) {
     const family = chipFamilyFromBoard(envs.find((entry) => entry.name === chosenEnv)?.board)
       ?? chipFamilyFromBoard(envs.find((entry) => entry.default)?.board)
     const binary = addr2lineBinary(family)
-    if (binary === undefined) throw new Error(`No addr2line for ${family ?? 'this chip'}: install the PlatformIO toolchain (tools/setup-toolchain.sh).`)
+    if (binary === undefined) throw new Error(`No addr2line for ${family ?? 'this chip'}: install the PlatformIO toolchain with \`board_tools\` action \`install\` id \`armgcc\`.` )
     if (panic.addresses.length === 0) {
       throw new Error('Panic found, but no addresses in it: the log was cut before "Backtrace:". Paste a longer log or enable core dumps.')
     }
