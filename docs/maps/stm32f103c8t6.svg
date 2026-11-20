@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 530 530" width="530" height="530" role="img" aria-label="STM32F103C8T6">
+  <rect x="0" y="0" width="530" height="530" fill="#ffffff"/>
+  <rect x="124" y="124" width="282" height="282" rx="7" fill="#f7faf9" stroke="#c7d3cf" stroke-width="1.5"/>
+  <circle cx="137" cy="137" r="4" fill="none" stroke="#93a8a2" stroke-width="1.5"/>
+  <text x="265" y="269" fill="#93a8a2" font-size="11" font-weight="600" text-anchor="middle" font-family="sans-serif">STM32F103C8T6</text>
+  <text x="265" y="283" fill="#93a8a2" font-size="8" text-anchor="middle" font-family="ui-monospace,monospace">QFP48</text>
+  <line x1="124" y1="149.5" x2="111" y2="149.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="145" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="152.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">VBAT</text>
+  <text x="132" y="152.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">1</text>
+  <line x1="124" y1="170.5" x2="111" y2="170.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="166" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="173.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PC13</text>
+  <text x="132" y="173.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">2</text>
+  <line x1="124" y1="191.5" x2="111" y2="191.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="187" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="194.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PC14</text>
+  <text x="132" y="194.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">3</text>
+  <line x1="124" y1="212.5" x2="111" y2="212.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="208" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="215.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PC15</text>
+  <text x="132" y="215.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">4</text>
+  <line x1="124" y1="233.5" x2="111" y2="233.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="229" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="236.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PD0</text>
+  <text x="132" y="236.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">5</text>
+  <line x1="124" y1="254.5" x2="111" y2="254.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="250" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="257.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PD1</text>
+  <text x="132" y="257.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">6</text>
+  <line x1="124" y1="275.5" x2="111" y2="275.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="271" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="278.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">NRST</text>
+  <text x="132" y="278.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">7</text>
+  <line x1="124" y1="296.5" x2="111" y2="296.5" stroke="#12895c" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="292" width="9" height="9" rx="2" fill="#12895c" stroke="#12895c" stroke-width="1.2"/>
+  <text x="108" y="299.7" fill="#12895c" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">VSSA</text>
+  <text x="132" y="299.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">8</text>
+  <line x1="124" y1="317.5" x2="111" y2="317.5" stroke="#12895c" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="313" width="9" height="9" rx="2" fill="#12895c" stroke="#12895c" stroke-width="1.2"/>
+  <text x="108" y="320.7" fill="#12895c" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">VDDA</text>
+  <text x="132" y="320.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">9</text>
+  <line x1="124" y1="338.5" x2="111" y2="338.5" stroke="#12895c" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="334" width="9" height="9" rx="2" fill="#12895c" stroke="#12895c" stroke-width="1.2"/>
+  <text x="108" y="341.7" fill="#12895c" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PA0</text>
+  <text x="132" y="341.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">10</text>
+  <line x1="124" y1="359.5" x2="111" y2="359.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="355" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="362.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PA1</text>
+  <text x="132" y="362.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">11</text>
+  <line x1="124" y1="380.5" x2="111" y2="380.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="106.5" y="376" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="108" y="383.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">PA2</text>
+  <text x="132" y="383.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start">12</text>
+  <line x1="149.5" y1="406" x2="149.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="145" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="146.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 146.3 422)">PA3</text>
+  <text x="146.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 146.7 398)">13</text>
+  <line x1="406" y1="380.5" x2="419" y2="380.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="376" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="383.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PB12</text>
+  <text x="398" y="383.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">25</text>
+  <line x1="380.5" y1="124" x2="380.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="376" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="383.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 383.7 108)">PA14</text>
+  <text x="383.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 383.3 132)">37</text>
+  <line x1="170.5" y1="406" x2="170.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="166" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="167.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 167.3 422)">PA4</text>
+  <text x="167.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 167.7 398)">14</text>
+  <line x1="406" y1="359.5" x2="419" y2="359.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="355" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="362.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PB13</text>
+  <text x="398" y="362.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">26</text>
+  <line x1="359.5" y1="124" x2="359.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="355" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="362.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 362.7 108)">PA15</text>
+  <text x="362.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 362.3 132)">38</text>
+  <line x1="191.5" y1="406" x2="191.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="187" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="188.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 188.3 422)">PA5</text>
+  <text x="188.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 188.7 398)">15</text>
+  <line x1="406" y1="338.5" x2="419" y2="338.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="334" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="341.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PB14</text>
+  <text x="398" y="341.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">27</text>
+  <line x1="338.5" y1="124" x2="338.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="334" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="341.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 341.7 108)">PB3</text>
+  <text x="341.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 341.3 132)">39</text>
+  <line x1="212.5" y1="406" x2="212.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="208" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="209.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 209.3 422)">PA6</text>
+  <text x="209.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 209.7 398)">16</text>
+  <line x1="406" y1="317.5" x2="419" y2="317.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="313" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="320.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PB15</text>
+  <text x="398" y="320.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">28</text>
+  <line x1="317.5" y1="124" x2="317.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="313" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="320.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 320.7 108)">PB4</text>
+  <text x="320.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 320.3 132)">40</text>
+  <line x1="233.5" y1="406" x2="233.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="229" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="230.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 230.3 422)">PA7</text>
+  <text x="230.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 230.7 398)">17</text>
+  <line x1="406" y1="296.5" x2="419" y2="296.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="292" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="299.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PA8</text>
+  <text x="398" y="299.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">29</text>
+  <line x1="296.5" y1="124" x2="296.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="292" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="299.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 299.7 108)">PB5</text>
+  <text x="299.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 299.3 132)">41</text>
+  <line x1="254.5" y1="406" x2="254.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="250" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="251.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 251.3 422)">PB0</text>
+  <text x="251.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 251.7 398)">18</text>
+  <line x1="406" y1="275.5" x2="419" y2="275.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="271" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="278.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PA9</text>
+  <text x="398" y="278.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">30</text>
+  <line x1="275.5" y1="124" x2="275.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="271" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="278.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 278.7 108)">PB6</text>
+  <text x="278.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 278.3 132)">42</text>
+  <line x1="275.5" y1="406" x2="275.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="271" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="272.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 272.3 422)">PB1</text>
+  <text x="272.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 272.7 398)">19</text>
+  <line x1="406" y1="254.5" x2="419" y2="254.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="250" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="257.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PA10</text>
+  <text x="398" y="257.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">31</text>
+  <line x1="254.5" y1="124" x2="254.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="250" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="257.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 257.7 108)">PB7</text>
+  <text x="257.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 257.3 132)">43</text>
+  <line x1="296.5" y1="406" x2="296.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="292" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="293.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 293.3 422)">PB2</text>
+  <text x="293.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 293.7 398)">20</text>
+  <line x1="406" y1="233.5" x2="419" y2="233.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="229" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="236.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PA11</text>
+  <text x="398" y="236.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">32</text>
+  <line x1="233.5" y1="124" x2="233.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="229" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="236.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 236.7 108)">BOOT0</text>
+  <text x="236.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 236.3 132)">44</text>
+  <line x1="317.5" y1="406" x2="317.5" y2="419" stroke="#12895c" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="313" y="414.5" width="9" height="9" rx="2" fill="#12895c" stroke="#12895c" stroke-width="1.2"/>
+  <text x="314.3" y="422" fill="#12895c" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 314.3 422)">PB10</text>
+  <text x="314.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 314.7 398)">21</text>
+  <line x1="406" y1="212.5" x2="419" y2="212.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="208" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="215.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PA12</text>
+  <text x="398" y="215.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">33</text>
+  <line x1="212.5" y1="124" x2="212.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="208" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="215.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 215.7 108)">PB8</text>
+  <text x="215.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 215.3 132)">45</text>
+  <line x1="338.5" y1="406" x2="338.5" y2="419" stroke="#12895c" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="334" y="414.5" width="9" height="9" rx="2" fill="#12895c" stroke="#12895c" stroke-width="1.2"/>
+  <text x="335.3" y="422" fill="#12895c" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 335.3 422)">PB11</text>
+  <text x="335.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 335.7 398)">22</text>
+  <line x1="406" y1="191.5" x2="419" y2="191.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="187" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="194.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">PA13</text>
+  <text x="398" y="194.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">34</text>
+  <line x1="191.5" y1="124" x2="191.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="187" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="194.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 194.7 108)">PB9</text>
+  <text x="194.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 194.3 132)">46</text>
+  <line x1="359.5" y1="406" x2="359.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="355" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="356.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 356.3 422)">VSS</text>
+  <text x="356.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 356.7 398)">23</text>
+  <line x1="406" y1="170.5" x2="419" y2="170.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="166" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="173.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">VSS</text>
+  <text x="398" y="173.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">35</text>
+  <line x1="170.5" y1="124" x2="170.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="166" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="173.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 173.7 108)">VSS</text>
+  <text x="173.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 173.3 132)">47</text>
+  <line x1="380.5" y1="406" x2="380.5" y2="419" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="376" y="414.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="377.3" y="422" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 377.3 422)">VDD</text>
+  <text x="377.7" y="398" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end" transform="rotate(-90 377.7 398)">24</text>
+  <line x1="406" y1="149.5" x2="419" y2="149.5" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="414.5" y="145" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="422" y="152.7" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start">VDD</text>
+  <text x="398" y="152.3" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="end">36</text>
+  <line x1="149.5" y1="124" x2="149.5" y2="111" stroke="#93a8a2" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="145" y="106.5" width="9" height="9" rx="2" fill="#ffffff" stroke="#c7d3cf" stroke-width="1.2"/>
+  <text x="152.7" y="108" fill="#26332f" font-size="9" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 152.7 108)">VDD</text>
+  <text x="152.3" y="132" fill="#93a8a2" font-size="7" font-family="ui-monospace,monospace" text-anchor="start" transform="rotate(-90 152.3 132)">48</text>
+</svg>

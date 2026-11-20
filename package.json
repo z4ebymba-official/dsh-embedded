@@ -50,7 +50,8 @@
     "agents/restrict.js",
     "tools/*.mjs",
     "maps/*.json",
-    "docs/*"
+    "docs",
+    "CHANGELOG.md"
   ],
   "dsh": {
     "bundle": {
