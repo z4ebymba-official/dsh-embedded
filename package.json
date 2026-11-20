@@ -1,6 +1,6 @@
 {
   "name": "dsh-board-lab",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "type": "module",
   "description": "Build, flash and read UART logs for ESP32, AVR, STM32 and AT32 boards — the board tools, the Board lab panel and the «Плата-дев» agent preset",
   "keywords": [

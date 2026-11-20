@@ -52,6 +52,8 @@ const DEFAULTS = {
   defaultBaud: 115200,
   /** Cap for captured subprocess output, in characters. */
   maxOutputBytes: 64 * 1024,
+  /** Size at which a monitor log rotates to `<log>.1`; one generation is kept. */
+  maxLogBytes: 8 * 1024 * 1024,
 }
 
 const ANSI = /\u001B\[[0-9;]*m/g
@@ -978,19 +980,28 @@ export function apply(ctx, config = {}) {
   }
 
   /** Guess the board map from a PlatformIO board id, e.g. "esp32-s3-devkitc-1". */
+  /**
+   * Map for a PlatformIO board id. Three maps may claim the same board id
+   * (`esp32-s3-devkitc-1` names a DevKitC, an N4R2 and a Super Mini), so a
+   * tie is never resolved by file order: the id itself wins, then a name only
+   * one map claims, then a verified map among the loose substring matches.
+   * Anything still tied stays unmatched — a wrong pinout is worse than none.
+   */
   function matchMap(board) {
-    const wanted = typeof board === 'string' ? board.toLowerCase() : ''
+    const wanted = typeof board === 'string' ? board.trim().toLowerCase() : ''
     if (wanted === '') return undefined
     const maps = boardMaps()
-    for (const map of maps) {
-      if (map.id.toLowerCase() === wanted) return map
+    const exact = maps.find((map) => String(map.id).toLowerCase() === wanted)
+    if (exact !== undefined) return exact
+    const namesOf = (map) => (Array.isArray(map.board) ? map.board : []).filter((alias) => typeof alias === 'string' && alias.trim() !== '')
+    const choose = (list) => {
+      if (list.length === 1) return list[0]
+      const verified = list.filter((map) => map.verified !== false)
+      return verified.length === 1 ? verified[0] : undefined
     }
-    for (const map of maps) {
-      for (const alias of Array.isArray(map.board) ? map.board : []) {
-        if (typeof alias === 'string' && wanted.includes(alias.toLowerCase())) return map
-      }
-    }
-    return undefined
+    const named = maps.filter((map) => namesOf(map).some((alias) => alias.trim().toLowerCase() === wanted))
+    if (named.length > 0) return choose(named)
+    return choose(maps.filter((map) => namesOf(map).some((alias) => wanted.includes(alias.trim().toLowerCase()))))
   }
 
   function wiringFile() {
@@ -1432,6 +1443,12 @@ export function apply(ctx, config = {}) {
     if (path === undefined) throw new Error('No current project: select one first (board_project action "select").')
     const summary = projectSummary(path)
     const map = findMap(board) ?? findMap(readWiringFile()[summary.path]?.board) ?? matchMap(projectBoard(summary))
+    if (map === undefined) {
+      const wanted = projectBoard(summary)
+      throw new Error(wanted === undefined
+        ? `No board map for ${summary.path}: its environment names no board. Pick one with board_maps action "set" and \`board\`.`
+        : `No board map for "${wanted}": run board_maps action "list", then action "set" with the map id.`)
+    }
     const byNumber = new Map()
     const byPort = new Map()
     for (const pin of pinEntries(map)) {
@@ -1789,6 +1806,7 @@ export function apply(ctx, config = {}) {
           running: state.running,
           stale: state.stale,
           open: state.open === true,
+          rotated: Number(state.rotated) || 0,
           error: state.error ?? undefined,
         })
       })
@@ -1886,6 +1904,8 @@ export function apply(ctx, config = {}) {
       '--log', paths.log,
       '--state', paths.state,
       '--reset', reset,
+      // A tiny or bogus cap would rotate on every write and eat the log.
+      '--max-log-bytes', String(Math.max(4096, Number(settings.maxLogBytes) || DEFAULTS.maxLogBytes)),
     ], {
       cwd: baseDir,
       env: pythonEnv(),
@@ -2020,7 +2040,7 @@ export function apply(ctx, config = {}) {
         ? current
         : {}
     offsets[port] = consumer === 'all'
-      ? { agent: value, panel: value }
+      ? { ...base, agent: value, panel: value }
       : { ...base, [consumer]: value }
   }
 
@@ -2030,6 +2050,10 @@ export function apply(ctx, config = {}) {
     const size = existsSync(paths.log) ? statSync(paths.log).size : 0
     const offsets = readJson(paths.offsets) ?? {}
     let start = fromStart ? 0 : consumerOffset(offsets[port], consumer)
+    // A cursor past the end can only mean the log rotated (`monitor.py` renames
+    // it to `.1` and starts a fresh file) or was truncated by hand: reading from
+    // 0 is the only way not to lose the new file's first bytes.
+    const reset = !fromStart && Number.isFinite(start) && start > size
     if (!Number.isFinite(start) || start < 0 || start > size) start = 0
     const cap = Math.max(1, Math.min(Number(maxBytes) || 65536, 1 << 20))
     const wanted = Math.max(0, Math.min(size - start, cap))
@@ -2055,6 +2079,7 @@ export function apply(ctx, config = {}) {
       nextOffset,
       pendingBytes: size - nextOffset,
       startOffset: start,
+      reset,
     }
   }
 
@@ -2080,6 +2105,10 @@ export function apply(ctx, config = {}) {
       stale: state?.stale === true,
       open: state?.open === true,
       baud: state?.baud,
+      rotated: Number(state?.rotated) || 0,
+      // `reset` comes from the byte range: the stored cursor was past the end of
+      // the file, so this read restarted at 0 (log rotated or truncated).
+      reset: chunk.reset === true,
       error: state?.open === false ? (state?.error ?? undefined) : undefined,
     }
   }
@@ -2152,15 +2181,13 @@ export function apply(ctx, config = {}) {
     })
   }
 
-  async function writeOp({ port, text, newline = true }) {
+  async function writeOp({ port, text, newline = true, ending = 'lf' }) {
     const chosenPort = port || selectPort(undefined)
     await ensureMonitorOpen(chosenPort)
-    const answer = await monitorCommand(chosenPort, {
-      cmd: 'write',
-      text: newline ? `${String(text)}\n` : String(text),
-    })
+    const payload = newline ? `${String(text)}${ending === 'crlf' ? '\r\n' : '\n'}` : String(text)
+    const answer = await monitorCommand(chosenPort, { cmd: 'write', text: payload })
     if (answer?.ok !== true) throw new Error(answer?.error ?? 'write failed')
-    return { ok: true, port: chosenPort, bytes: Buffer.byteLength(String(text)) }
+    return { ok: true, port: chosenPort, bytes: Buffer.byteLength(payload) }
   }
 
   async function resetOp({ port }) {
@@ -2942,8 +2969,12 @@ export function apply(ctx, config = {}) {
             text: result.text,
           }
         } else if (action === 'write') {
-          const result = await writeOp({ port: chosenPort, text: options.text, lineEnding: options.lineEnding })
-          outcome = { ok: result.ok === true, detail: `wrote ${JSON.stringify(options.text)}` }
+          const ending = options.lineEnding === 'crlf' ? 'crlf' : options.lineEnding === 'none' ? 'none' : 'lf'
+          const result = await writeOp({ port: chosenPort, text: options.text, newline: ending !== 'none', ending })
+          outcome = {
+            ok: result.ok === true,
+            detail: `wrote ${JSON.stringify(options.text)}${ending === 'none' ? ' without a line ending' : ending === 'crlf' ? ' + CRLF' : ''}`,
+          }
         } else if (action === 'reset') {
           const result = await resetOp({ port: chosenPort })
           outcome = { ok: result.ok === true, detail: 'reset' }
@@ -3312,7 +3343,7 @@ export function apply(ctx, config = {}) {
     {
       name: 'board_maps',
       description:
-        'The board map: the pins of a board or a chip (from the plugin\'s maps/ folder) and what is wired to them for the current project (`.board-lab/wiring.json`, the same data the panel shows). get answers "which pin is the buzzer on" and "is GPIO4 free"; set records a connection by pin name, or by pin number when one name sits on several pins; draft proposes connections from the project source (`#define DIO 4`, `const int LED = 2`), never overwriting a pin that already has a label; save composes a map in place. A chip is saved as `package` plus `pins`: the datasheet pin table in physical order, index 0 is pin 1, names only — the renderer cuts the outline into sides and numbers the pins counter-clockwise, so there are no coordinates to place. `funcs` adds the alternate functions of a pin by number (USART1_TX, TIM1_CH2); they show up on hover and in the pin table. A board with two pin headers is saved as `sides`, pins in the order they sit on the header. Pin tables are repo files under maps/: change them through save, so the layout ships with the plugin.',
+        'The board map: the pins of a board or a chip (from the plugin\'s maps/ folder) and what is wired to them for the current project (`.board-lab/wiring.json`, the same data the panel shows). get answers "which pin is the buzzer on" and "is GPIO4 free"; set records a connection by pin name, or by pin number when one name sits on several pins, and without `pin` it chooses which map the project uses — needed when several maps answer to one env.board and the id alone cannot tell a DevKitC from a Super Mini; draft proposes connections from the project source (`#define DIO 4`, `const int LED = 2`), never overwriting a pin that already has a label; save composes a map in place. A chip is saved as `package` plus `pins`: the datasheet pin table in physical order, index 0 is pin 1, names only — the renderer cuts the outline into sides and numbers the pins counter-clockwise, so there are no coordinates to place. `funcs` adds the alternate functions of a pin by number (USART1_TX, TIM1_CH2); they show up on hover and in the pin table. A board with two pin headers is saved as `sides`, pins in the order they sit on the header. Pin tables are repo files under maps/: change them through save, so the layout ships with the plugin.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -3325,7 +3356,7 @@ export function apply(ctx, config = {}) {
           },
           project: { ...PROJECT_PARAM, description: 'Project whose wiring to use; defaults to the current project.' },
           board: { type: 'string', description: 'Map id from action "list", for example esp32-s3-devkitc-1. Omit to use the board already chosen for the project.' },
-          pin: { type: 'string', description: 'Pin name for set, exactly as the map spells it (GPIO4, D4, PA5).' },
+          pin: { type: 'string', description: 'Pin name for set, exactly as the map spells it (GPIO4, D4, PA5). Omit to choose the map itself for the project.' },
           label: { type: 'string', description: 'What is wired to the pin, for example "TM1637 DIO". Empty string clears the pin.' },
           id: { type: 'string', description: 'Map id for save: lowercase letters, digits, dot, dash, e.g. "arduino-nano-v3".' },
           name: { type: 'string', description: 'Human name for save, e.g. "Arduino Nano v3".' },
@@ -3486,6 +3517,21 @@ export function apply(ctx, config = {}) {
           })
         }
         if (action === 'set') {
+          if (args.pin === undefined || args.pin === '') {
+            // No pin: choose which map the project uses. A project whose
+            // env.board names three different boards needs this.
+            const chosen = findMap(board)
+            if (chosen === undefined) {
+              throw new Error(board === undefined
+                ? 'Pass `board` with a map id from action "list" to choose the map for this project.'
+                : `Unknown board map "${board}": run action "list" to see them.`)
+            }
+            const wiring = wiringBoard({ project, board: chosen.id })
+            return compact({
+              ok: true, action, project: wiring.project, board: wiring.board,
+              count: pinList(chosen).length, pins: pinReport(chosen, wiring.pins),
+            })
+          }
           const wiring = wiringSet({ project, board: board ?? wiringGet({ project }).board, pin: args.pin, label: args.label })
           const map = findMap(wiring.board)
           return compact({ ok: true, action, project: wiring.project, board: wiring.board, pins: pinReport(map, wiring.pins) })
@@ -3524,7 +3570,7 @@ export function apply(ctx, config = {}) {
     {
       name: 'board_monitor',
       description:
-        'Persistent UART monitor. action=start keeps the port open in a detached process and captures everything the device prints; action=read returns only new output since the previous read (peek does not advance, fromStart reads the whole log); action=stop closes it; action=status lists monitors. Reading does not reset the board, so boot logs survive between calls. Pass `lines` to get just the tail of the new output — the usual way to look at a log after a change.',
+        'Persistent UART monitor. action=start keeps the port open in a detached process and captures everything the device prints; action=read returns only new output since the previous read (peek does not advance, fromStart reads the whole log); action=stop closes it; action=status lists monitors. Reading does not reset the board, so boot logs survive between calls. Pass `lines` to get just the tail of the new output — the usual way to look at a log after a change. The log rotates at `maxLogBytes` (8 MiB, one `.1` generation); after a rotation a read starts at the beginning of the new file and says so (`reset`).',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -3564,6 +3610,8 @@ export function apply(ctx, config = {}) {
             nextOffset: { type: 'integer' },
             pendingBytes: { type: 'integer' },
             startOffset: { type: 'integer' },
+            reset: { type: 'boolean' },
+            rotated: { type: 'integer' },
             droppedLines: { type: 'integer' },
             monitors: {
               type: 'array',
@@ -3576,6 +3624,7 @@ export function apply(ctx, config = {}) {
                   running: { type: 'boolean' },
                   open: { type: 'boolean' },
                   stale: { type: 'boolean' },
+                  rotated: { type: 'integer' },
                   error: { type: 'string' },
                 },
               },
@@ -3585,6 +3634,11 @@ export function apply(ctx, config = {}) {
         },
         render: (_args, value) => {
           if (value.action === 'read') {
+            // The cursor was past the end of the file: the log rotated (or was
+            // truncated), so these bytes are the head of the new file.
+            const rotated = value.reset === true
+              ? '(the log rotated or was truncated — this is the beginning of the new file)\n\n'
+              : ''
             const skipped = Number.isInteger(value.droppedLines) && value.droppedLines > 0
               ? `\n\n(${value.droppedLines} earlier line${value.droppedLines === 1 ? '' : 's'} skipped — read again with fromStart to see them)`
               : ''
@@ -3593,9 +3647,9 @@ export function apply(ctx, config = {}) {
               // from a live device: say so instead of letting them pass for the
               // current output of the board.
               if (value.running === false) {
-                return [{ type: 'text', text: `${value.text}${skipped}\n\n(monitor is not running — this is buffered output from the log; start it again to capture more)` }]
+                return [{ type: 'text', text: `${rotated}${value.text}${skipped}\n\n(monitor is not running — this is buffered output from the log; start it again to capture more)` }]
               }
-              return [{ type: 'text', text: `${value.text}${skipped}` }]
+              return [{ type: 'text', text: `${rotated}${value.text}${skipped}` }]
             }
             if (value.running === false) {
               return [{ type: 'text', text: `(no new output on ${value.port} — the monitor is not running; start it again to capture more)` }]
@@ -4021,8 +4075,8 @@ export function apply(ctx, config = {}) {
       async execute(args) {
         const action = args.action ?? 'list'
         if (action === 'install') {
-          const started = await installToolsOp({ ids: args.ids })
-          return { ok: true, tools: [], installed: 0, total: 0, install: started }
+          const { ok: _started, ...install } = await installToolsOp({ ids: args.ids })
+          return { ok: true, tools: [], installed: 0, total: 0, install }
         }
         return { ...(await toolInventory()), ok: true }
       },
@@ -4379,6 +4433,7 @@ export function apply(ctx, config = {}) {
           verified: body.verified,
           package: body.package,
           pins: body.pins,
+          funcs: body.funcs,
           draw: body.draw,
           pads: body.pads,
         })

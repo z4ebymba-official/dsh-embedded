@@ -1,0 +1,60 @@
+{
+  "id": "esp32-s3-devkitc-1-n4r2",
+  "name": "ESP32-S3-DevKitC-1 N4R2 (4 МБ / 2 МБ PSRAM)",
+  "board": [
+    "esp32-s3-devkitc",
+    "n4r2"
+  ],
+  "verified": false,
+  "sides": {
+    "left": [
+      "3V3",
+      "3V3",
+      "RST",
+      "GPIO4",
+      "GPIO5",
+      "GPIO6",
+      "GPIO7",
+      "GPIO15",
+      "GPIO16",
+      "GPIO17",
+      "GPIO18",
+      "GPIO8",
+      "GPIO19",
+      "GPIO20",
+      "GPIO3",
+      "GPIO46",
+      "GPIO9",
+      "GPIO10",
+      "GPIO11",
+      "GPIO12",
+      "GPIO13",
+      "GPIO14"
+    ],
+    "right": [
+      "GND",
+      "GPIO43",
+      "GPIO44",
+      "GPIO1",
+      "GPIO2",
+      "GPIO42",
+      "GPIO41",
+      "GPIO40",
+      "GPIO39",
+      "GPIO38",
+      "GPIO37",
+      "GPIO36",
+      "GPIO35",
+      "GPIO0",
+      "GPIO45",
+      "GPIO48",
+      "GPIO47",
+      "GPIO21",
+      "5V",
+      "GND",
+      "GND",
+      "GND"
+    ]
+  },
+  "note": "По факту чипа: 4 МБ flash, 2 МБ PSRAM, MAC 68:ee:8f:db:d1:3c. Порядок ножек по даташиту DevKitC-1, не сверен с шелкографией. esp32-s3-devkitc-1 не в алиасах: это id DevKitC, и без ручного выбора макета вариант N4R2 не отличить от него по env.board."
+}

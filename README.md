@@ -168,6 +168,12 @@ dsh plugin --profile desktop add git+https://github.com/z4ebymba-official/dsh-em
 - `toolchainDir` — локальный тулчейн (по умолчанию `.toolchain`); если его нет, берётся PlatformIO.
 - `projectsDir` — папка проектов (по умолчанию `firmware`).
 - `python` — явный интерпретатор, если PlatformIO стоит нестандартно.
+- `stateDir` — где живут лог монитора, `offsets.json` и контрольные точки (по умолчанию
+  `.board-lab`).
+- `defaultBaud` — скорость монитора по умолчанию (115200).
+- `maxOutputBytes` — предел захваченного вывода сборки/прошивки (64 КиБ).
+- `maxLogBytes` — размер, при котором лог монитора ротируется в `.log.1` (8 МиБ);
+  хранится одна предыдущая версия, после ротации читатель начинает с начала нового файла.
 
 На Linux для serial нужны права (иначе esptool получает `Permission denied`):
 
@@ -196,7 +202,7 @@ node tests/plugin_contract.mjs --port /dev/ttyACM0   # то же с живой �
 ## Документация
 
 [`docs/board-lab.md`](docs/board-lab.md) — монитор и курсоры чтения, паники, сценарии,
-автоопределение, ESP32-S3 (16 МБ flash / 8 МБ PSRAM), AT32, Windows, ограничения.
+автоопределение, ESP32-S3, AT32, Windows, ограничения.
 
 ## Лицензия
 

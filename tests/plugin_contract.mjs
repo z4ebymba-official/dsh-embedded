@@ -16,7 +16,7 @@
  *   node tests/plugin_contract.mjs --port X   # also checks the real board
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -121,6 +121,9 @@ apply(ctx, {
   toolchainDir: '.toolchain',
   projectsDir: 'firmware',
   stateDir: STATE_DIR,
+  // Small enough that one burst of output rotates the log: the default 8 MiB
+  // would need a full UART session to exercise the same branch.
+  maxLogBytes: 8 * 1024,
 })
 
 if (duplicateRoutes.length > 0) fail(`routes: duplicate exact route(s) ${duplicateRoutes.join(', ')} — the web server throws and loses every later route`)
@@ -148,6 +151,21 @@ while True:
     os.write(master, data)
 `
 
+/** A pty path is reused (`/dev/pts/5`), while log and offsets live per port:
+ *  without this wipe the second test reads the first test's tail and a passing
+ *  `fromStart` check fails for the wrong reason. */
+function forgetDevice(port) {
+  const stem = `monitor-${port.replace(/[^a-zA-Z0-9._-]+/g, '_')}`
+  for (const name of readdirSync(STATE_DIR)) {
+    if (name === stem || name.startsWith(`${stem}.`)) rmSync(join(STATE_DIR, name), { force: true })
+  }
+  const offsets = join(STATE_DIR, 'offsets.json')
+  if (!existsSync(offsets)) return
+  const data = JSON.parse(readFileSync(offsets, 'utf8'))
+  delete data[port]
+  writeFileSync(offsets, JSON.stringify(data))
+}
+
 async function startPty() {
   const child = spawn('python3', ['-c', PTY_HELPER], { stdio: ['ignore', 'pipe', 'inherit'] })
   const path = await new Promise((resolvePromise, reject) => {
@@ -162,6 +180,7 @@ async function startPty() {
     })
     child.on('error', reject)
   })
+  forgetDevice(path)
   return { path, stop: () => child.kill('SIGKILL') }
 }
 
@@ -232,6 +251,7 @@ while True:
     })
     child.on('error', reject)
   })
+  forgetDevice(device)
   try {
     await call('board_monitor', { action: 'start', port: device, reset: 'none' })
     const watching = call('board_watch', { port: device, pattern: 'READY', timeoutMs: 6000 })
@@ -437,6 +457,7 @@ while True:
     })
     child.on('error', reject)
   })
+  forgetDevice(device)
   const scenario = join(STATE_DIR, 'scenario.json')
   writeFileSync(scenario, JSON.stringify({
     name: 'pty smoke',
@@ -469,6 +490,71 @@ while True:
   if (!ids.includes('platformio') || !ids.includes('esptool')) fail('tools: platformio/esptool rows are missing')
   if (inventory.tools.some((row) => typeof row.ok !== 'boolean')) fail('tools: every row needs a boolean ok')
   if (inventory.install?.running === true) fail('tools: an install was already running')
+}
+
+// ------------------------------------------------------- log rotation
+// `monitor.py` renames the log to `.1` and starts a fresh file. A stored cursor
+// past the end then means "the file was replaced": the read must restart at 0
+// and say so, otherwise the first bytes of the new file are lost silently.
+const PTY_BURST = `
+import os, pty, sys, time
+master, slave = pty.openpty()
+print(os.ttyname(slave), flush=True)
+line = 0
+while True:
+    # Keeps writing: rotation renames the file away, so a single burst would be
+    # renamed out of sight and the fresh log would stay empty.
+    os.write(master, b'filler %05d 0123456789 abcdefghijklmnop\\n' % line)
+    line += 1
+    if line % 20 == 0:
+        os.write(master, b'DONE\\n')
+    time.sleep(0.004)
+`
+{
+  const child = spawn('python3', ['-c', PTY_BURST], { stdio: ['ignore', 'pipe', 'inherit'] })
+  const device = await new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error('burst-pty helper did not report its device')), 5000)
+    let buffer = ''
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString()
+      if (buffer.includes('\n')) {
+        clearTimeout(timer)
+        resolvePromise(buffer.split('\n')[0].trim())
+      }
+    })
+    child.on('error', reject)
+  })
+  forgetDevice(device)
+  try {
+    await call('board_monitor', { action: 'start', port: device, reset: 'none' })
+    let read
+    let rotated = 0
+    const deadline = Date.now() + 8000
+    while (Date.now() < deadline) {
+      read = await call('board_monitor', { action: 'read', port: device, fromStart: true, maxBytes: 65536 })
+      rotated = read.rotated ?? 0
+      if (rotated > 0 && (read.text ?? '').includes('DONE')) break
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 200))
+    }
+    if (!(rotated > 0)) fail(`rotation: the ${300 * 34} bytes written did not rotate an 8 KiB log (rotated=${rotated})`)
+    if ((read?.totalBytes ?? 0) > 8 * 1024 + 4096) fail(`rotation: the log kept ${read?.totalBytes} bytes, the cap is 8 KiB + one chunk`)
+    const status = await call('board_monitor', { action: 'status' })
+    const listed = status.monitors.find((item) => item.port === device)
+    if (listed?.rotated === undefined) fail('rotation: status does not report the rotation counter')
+    // Cursor stored beyond the end of the replaced file: a plain read must
+    // restart at 0 instead of answering "(no new output)".
+    const offsetsFile = join(STATE_DIR, 'offsets.json')
+    const offsets = JSON.parse(readFileSync(offsetsFile, 'utf8'))
+    offsets[device] = { agent: 10_000_000, panel: 0 }
+    writeFileSync(offsetsFile, JSON.stringify(offsets))
+    const after = await call('board_monitor', { action: 'read', port: device, lines: 2 })
+    if (after.reset !== true) fail(`rotation: a cursor past the end did not report reset (${JSON.stringify({ startOffset: after.startOffset, reset: after.reset })})`)
+    if (!(after.text ?? '').includes('filler')) fail(`rotation: the read after the reset returned ${JSON.stringify((after.text ?? '').slice(0, 60))}`)
+    console.log(`rotation: rotated=${rotated} log=${read.totalBytes}B reset=${after.reset}`)
+  } finally {
+    await call('board_monitor', { action: 'stop', port: device }).catch(() => {})
+    child.kill('SIGKILL')
+  }
 }
 
 // ------------------------------------------------------- current project pin

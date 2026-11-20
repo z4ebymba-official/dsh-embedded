@@ -1366,7 +1366,12 @@ window.__ModuleLoader__.load({
           if (kind === 'flash') {
             append('flash', result.summary, result.ok)
             if (!result.ok && result.output) append('flash', result.output, false)
-            append('system', result.monitor === 'restarted' ? t('log.monitorRestarted') : t('log.monitorIdle'), undefined)
+            // The server reports `started` only after a flash that succeeded, and
+            // `restarted` when it merely put a running monitor back after a failure.
+            const monitor = result.ok
+              ? result.monitor === 'started' ? t('log.monitorRestarted') : t('log.monitorIdle')
+              : result.monitor === 'restarted' ? t('log.monitorBack') : t('log.monitorIdle')
+            append('system', monitor, undefined)
           } else if (kind === 'build') {
             append('build', result.summary, result.ok)
             if (!result.ok && result.output) append('build', result.output, false)
@@ -1610,9 +1615,11 @@ window.__ModuleLoader__.load({
       const mapPins = mapPinList(wiring?.map)
       const pinFuncs = mapPins.find((pin) => pin.key === pinSel)?.func ?? []
       const pinName = (key) => {
-        const index = Number(key) - 1
         const names = wiring?.map?.pins
-        return Array.isArray(names) && Number.isInteger(index) && names[index] !== undefined ? names[index] : ''
+        const index = Number(key) - 1
+        if (!Array.isArray(names) || !Number.isInteger(index) || names[index] === undefined) return ''
+        const entry = names[index]
+        return typeof entry === 'string' ? entry : String(entry?.name ?? '')
       }
       const chatPrompt = t('map.chatPrompt')
         .replace('{name}', wiring?.map?.name ?? '')
@@ -2286,9 +2293,6 @@ window.__ModuleLoader__.load({
         'tools.section.stm32': 'STM32',
         'tools.section.at32': 'AT32 / ARM',
         'panel.subtitle': 'Build, flash and watch the device without unplugging it.',
-        'section.connection': 'Board',
-        'section.project': 'Project',
-        'section.quick': 'Commands',
         'command.add': 'Add the text in the input as a command of this project',
         'command.remove': 'Click sends, right-click removes',
         'command.added': 'Command added:',
@@ -2299,7 +2303,6 @@ window.__ModuleLoader__.load({
         'checkpoint.none': 'No checkpoints yet — save one before a risky edit.',
         'checkpoint.created': 'checkpoint saved',
         'checkpoint.restored': 'restored to',
-        'checkpoint.kept': 'previous state kept as',
         'checkpoint.deleted': 'checkpoint removed',
         'checkpoint.files': 'files',
         'checkpoint.restore': 'Restore this checkpoint',
@@ -2334,9 +2337,6 @@ window.__ModuleLoader__.load({
         'map.zoomIn': 'Zoom in',
         'map.zoomOut': 'Zoom out',
         'map.zoomFit': 'Fit',
-        'map.zoomIn': 'Приблизить',
-        'map.zoomOut': 'Отдалить',
-        'map.zoomFit': 'Вписать',
         'map.copyPrompt': 'Copy the message',
         'map.copied': 'Copied',
         'map.chatPrompt': 'Build the chip map «{name}» (id {id}): take the pin table from the datasheet, list the pin names in physical order (pin 1 first), then save it with board_maps action save, package.kind and pins. No coordinates.',
@@ -2362,8 +2362,6 @@ window.__ModuleLoader__.load({
         'device.none': 'no port',
         'device.empty': 'Press “Chip info” to read the identity through esptool.',
         'device.fromChip': 'esptool',
-        'status.platformio': 'PlatformIO',
-        'status.armgcc': 'arm-none-eabi-gcc',
         'status.monitorOn': 'monitor on',
         'status.monitorOff': 'monitor off',
         'status.monitorStale': 'monitor hung',
@@ -2377,10 +2375,7 @@ window.__ModuleLoader__.load({
         'action.flashing': 'Flashing…',
         'action.info': 'Chip info',
         'action.inspecting': 'Reading chip…',
-        'action.check': 'Check setup',
-        'action.checking': 'Checking…',
         'action.detect': 'Detect board',
-        'action.detecting': 'Detecting…',
         'action.test': 'Run tests',
         'action.testing': 'Running tests…',
         'action.monitorStart': 'Start monitor',
@@ -2389,12 +2384,6 @@ window.__ModuleLoader__.load({
         'action.send': 'Send',
         'field.project': 'Project',
         'field.projectAuto': 'auto-detect from board',
-        'project.current': 'current',
-        'project.none': 'No project selected yet. Pick one above or press “Detect board”.',
-        'project.folder': 'Folder',
-        'project.path': 'Path',
-        'project.board': 'Board',
-        'project.hint': 'Drop libraries into lib/ — PlatformIO picks them up on the next build.',
         'action.openFolder': 'Open folder',
         'action.openLib': 'Libraries',
         'log.projectSelected': 'current project:',
@@ -2415,10 +2404,6 @@ window.__ModuleLoader__.load({
         'log.copyFailed': 'clipboard is unavailable',
         'log.noMatch': 'nothing matches the filter',
         'log.clear': 'Clear',
-        'log.empty': 'Start the monitor or flash the board to see device output.',
-        'log.tipMonitor': '“Start monitor” opens the port and streams output here; flashing keeps it alive.',
-        'log.tipInfo': '“Chip info” reads chip, flash, PSRAM and MAC through esptool.',
-        'log.tipTests': '“Run tests” plays the project board-tests.json and reports every step.',
         'log.emptyTitle': 'The device is not streaming yet',
         'log.stepDetect': 'Detect the board — the port and project are picked automatically',
         'log.stepFlash': 'Flash — the monitor restarts and the boot log lands here',
@@ -2428,6 +2413,7 @@ window.__ModuleLoader__.load({
         'log.monitorStopped': 'monitor stopped on',
         'log.monitorRestarted': 'monitor restarted after flash',
         'log.monitorIdle': 'monitor was not running',
+        'log.monitorBack': 'the monitor is back on the log it had before',
         'log.reset': 'reset pulse sent',
         'log.detectFailed': 'board detection failed',
         'log.testPassed': 'tests passed',
@@ -2467,9 +2453,6 @@ window.__ModuleLoader__.load({
         'tools.section.stm32': 'STM32',
         'tools.section.at32': 'AT32 / ARM',
         'panel.subtitle': 'Сборка, прошивка и живой UART — не отключая плату.',
-        'section.connection': 'Плата',
-        'section.project': 'Проект',
-        'section.quick': 'Команды',
         'command.add': 'Добавить текст из поля ввода в команды этого проекта',
         'command.remove': 'Клик — отправить, правый клик — убрать',
         'command.added': 'Команда добавлена:',
@@ -2480,7 +2463,6 @@ window.__ModuleLoader__.load({
         'checkpoint.none': 'Точек пока нет — поставь перед рискованной правкой.',
         'checkpoint.created': 'точка создана',
         'checkpoint.restored': 'откатился к',
-        'checkpoint.kept': 'прошлое состояние сохранено как',
         'checkpoint.deleted': 'точка удалена',
         'checkpoint.files': 'файлов',
         'checkpoint.restore': 'Откатить к этой точке',
@@ -2521,6 +2503,9 @@ window.__ModuleLoader__.load({
         'map.placeholder': 'что подключено',
         'map.save': 'Сохранить ножку',
         'map.clear': 'Очистить ножку',
+        'map.zoomIn': 'Приблизить',
+        'map.zoomOut': 'Отдалить',
+        'map.zoomFit': 'Вписать',
         'map.draft': 'Черновик из кода',
         'map.drafted': 'подключений из кода:',
         'map.cleared': 'ножка очищена',
@@ -2537,8 +2522,6 @@ window.__ModuleLoader__.load({
         'device.none': 'нет порта',
         'device.empty': 'Нажмите «Инфо о чипе», чтобы прочитать паспорт через esptool.',
         'device.fromChip': 'esptool',
-        'status.platformio': 'PlatformIO',
-        'status.armgcc': 'arm-none-eabi-gcc',
         'status.monitorOn': 'монитор включён',
         'status.monitorOff': 'монитор выключен',
         'status.monitorStale': 'монитор завис',
@@ -2552,10 +2535,7 @@ window.__ModuleLoader__.load({
         'action.flashing': 'Прошивка…',
         'action.info': 'Инфо о чипе',
         'action.inspecting': 'Читаю чип…',
-        'action.check': 'Проверить среду',
-        'action.checking': 'Проверяю…',
         'action.detect': 'Определить плату',
-        'action.detecting': 'Определяю…',
         'action.test': 'Прогнать тесты',
         'action.testing': 'Прогоняю тесты…',
         'action.monitorStart': 'Включить монитор',
@@ -2564,12 +2544,6 @@ window.__ModuleLoader__.load({
         'action.send': 'Отправить',
         'field.project': 'Проект',
         'field.projectAuto': 'автоопределение по плате',
-        'project.current': 'текущий',
-        'project.none': 'Проект ещё не выбран. Выберите выше или нажмите «Определить плату».',
-        'project.folder': 'Папка',
-        'project.path': 'Путь',
-        'project.board': 'Плата',
-        'project.hint': 'Кидайте библиотеки в lib/ — PlatformIO подхватит их при следующей сборке.',
         'action.openFolder': 'Открыть папку',
         'action.openLib': 'Библиотеки',
         'log.projectSelected': 'текущий проект:',
@@ -2590,10 +2564,6 @@ window.__ModuleLoader__.load({
         'log.copyFailed': 'буфер обмена недоступен',
         'log.noMatch': 'по фильтру ничего нет',
         'log.clear': 'Очистить',
-        'log.empty': 'Включите монитор или прошейте плату, чтобы увидеть вывод устройства.',
-        'log.tipMonitor': '«Включить монитор» открывает порт и льёт вывод сюда; прошивка его не сбрасывает.',
-        'log.tipInfo': '«Инфо о чипе» читает чип, флеш, PSRAM и MAC через esptool.',
-        'log.tipTests': '«Прогнать тесты» проигрывает board-tests.json проекта и показывает каждый шаг.',
         'log.emptyTitle': 'Устройство пока не пишет в лог',
         'log.stepDetect': 'Определите плату — порт и проект подставятся сами',
         'log.stepFlash': 'Прошейте — монитор перезапустится, загрузочный лог придёт сюда',
@@ -2603,6 +2573,7 @@ window.__ModuleLoader__.load({
         'log.monitorStopped': 'монитор остановлен на',
         'log.monitorRestarted': 'монитор перезапущен после прошивки',
         'log.monitorIdle': 'монитор не был запущен',
+        'log.monitorBack': 'монитор снова работает на прежнем логе',
         'log.reset': 'импульс сброса отправлен',
         'log.detectFailed': 'не удалось определить плату',
         'log.testPassed': 'тесты прошли',

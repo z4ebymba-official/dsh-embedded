@@ -1,0 +1,35 @@
+{
+  "id": "esp32-s3-supermini",
+  "name": "ESP32-S3 SuperMini (4 МБ / 2 МБ PSRAM, 2×9)",
+  "board": [
+    "supermini",
+    "c3-super-mini",
+    "super-mini"
+  ],
+  "verified": false,
+  "sides": {
+    "left": [
+      "5V",
+      "GND",
+      "3V3",
+      "GPIO4",
+      "GPIO3",
+      "GPIO2",
+      "GPIO1",
+      "GPIO0",
+      "GPIO18"
+    ],
+    "right": [
+      "GPIO5",
+      "GPIO6",
+      "GPIO7",
+      "GPIO8",
+      "GPIO9",
+      "GPIO10",
+      "GPIO20",
+      "GPIO21",
+      "GPIO19"
+    ]
+  },
+  "note": "Чип по esptool: ESP32-S3 v0.2, 4 МБ flash, 2 МБ PSRAM, MAC 68:ee:8f:db:d1:3c. Гребёнки по 9. 9-е ножки — GPIO18 и GPIO19 (D-/D+), предположение, требует сверки с шелкографией. esp32-s3-devkitc-1 не в алиасах: по env.board SuperMini не отличить от DevKitC, макет выбирается руками (board_maps action set без pin)."
+}

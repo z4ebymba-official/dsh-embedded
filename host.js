@@ -224,7 +224,14 @@ export function killTree(pid, force = false) {
 }
 
 /** True when `command` resolves on PATH (`where` on Windows, `which` elsewhere). */
+/** `which`/`where` is a process spawn, and the panel asks every few seconds. */
+const COMMAND_CACHE_MS = 10_000
+const commandCache = new Map()
+
 export function hasCommand(command) {
+  const cached = commandCache.get(command)
+  if (cached !== undefined && Date.now() - cached.at < COMMAND_CACHE_MS) return cached.value
+  let value = false
   try {
     execFileSync(isWindows ? 'where' : 'which', [command], {
       encoding: 'utf8',
@@ -232,10 +239,12 @@ export function hasCommand(command) {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],
     })
-    return true
+    value = true
   } catch {
-    return false
+    value = false
   }
+  commandCache.set(command, { at: Date.now(), value })
+  return value
 }
 
 /** Environment variable list separator for PYTHONPATH. */
